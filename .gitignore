@@ -1,0 +1,65 @@
+# ---- OS / Editor ----
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+.Spotlight-V100
+.Trashes
+
+.vscode/
+.idea/
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Packaging / build
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Test / type / lint caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# ---- Node / Nuxt ----
+node_modules/
+
+# Nuxt build outputs
+.nuxt/
+.output/
+.nitro/
+dist/
+
+# Package manager caches
+.pnpm-store/
+.yarn/
+
+# ---- Logs ----
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---- Env / Secrets (local only) ----
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# ---- Misc ----
+.DS_Store?
