@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 
 type RecorderStatus =
   | "idle"
@@ -6,6 +6,8 @@ type RecorderStatus =
   | "recording"
   | "stopping"
   | "error";
+
+type WebSocketStatus = "disconnected" | "connecting" | "connected" | "error";
 
 export function useAudioStreamRecorder(options?: {
   wsUrl?: string;
@@ -19,6 +21,8 @@ export function useAudioStreamRecorder(options?: {
 
   const status = ref<RecorderStatus>("idle");
   const error = ref<string | null>(null);
+  const wsStatus = ref<WebSocketStatus>("disconnected");
+  const lastMessage = ref<any>(null);
 
   const isRecording = computed(
     () => status.value === "recording" || status.value === "connecting"
@@ -27,6 +31,8 @@ export function useAudioStreamRecorder(options?: {
   let mediaStream: MediaStream | null = null;
   let mediaRecorder: MediaRecorder | null = null;
   let websocket: WebSocket | null = null;
+  let reconnectTimeout: NodeJS.Timeout | null = null;
+  let isClosing = false;
 
   function resetError() {
     error.value = null;
@@ -50,35 +56,73 @@ export function useAudioStreamRecorder(options?: {
     stream?.getTracks().forEach((t) => t.stop());
   }
 
-  function closeWebSocket(ws: WebSocket | null) {
+  function closeWebSocket() {
+    if (reconnectTimeout) {
+      clearTimeout(reconnectTimeout);
+      reconnectTimeout = null;
+    }
     try {
-      ws?.close();
+      if (websocket) {
+        isClosing = true;
+        websocket.close();
+        websocket = null;
+      }
     } catch {
       // ignore
     }
   }
 
-  async function openWebSocket(url: string): Promise<WebSocket> {
-    return await new Promise((resolve, reject) => {
-      const ws = new WebSocket(url);
-      ws.binaryType = "arraybuffer";
+  function connectWebSocket() {
+    if (!process.client) return;
+    if (websocket && websocket.readyState === WebSocket.OPEN) return;
 
-      const onOpen = () => {
-        cleanup();
-        resolve(ws);
-      };
-      const onError = () => {
-        cleanup();
-        reject(new Error("WebSocket connection failed"));
-      };
+    const url = wsUrl.value;
+    if (!url) {
+      error.value = "Missing WebSocket URL";
+      wsStatus.value = "error";
+      return;
+    }
 
-      const cleanup = () => {
-        ws.removeEventListener("open", onOpen);
-        ws.removeEventListener("error", onError);
-      };
+    wsStatus.value = "connecting";
+    const ws = new WebSocket(url);
+    ws.binaryType = "arraybuffer";
 
-      ws.addEventListener("open", onOpen);
-      ws.addEventListener("error", onError);
+    ws.addEventListener("open", () => {
+      console.log("WebSocket connected");
+      wsStatus.value = "connected";
+      error.value = null;
+      websocket = ws;
+    });
+
+    ws.addEventListener("message", (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        lastMessage.value = data;
+        console.log("Received message:", data);
+      } catch {
+        // If it's not JSON, store as raw data
+        lastMessage.value = event.data;
+      }
+    });
+
+    ws.addEventListener("error", (err) => {
+      console.error("WebSocket error:", err);
+      wsStatus.value = "error";
+      error.value = "WebSocket connection error";
+    });
+
+    ws.addEventListener("close", () => {
+      console.log("WebSocket closed");
+      wsStatus.value = "disconnected";
+      websocket = null;
+
+      // Auto-reconnect unless explicitly closing
+      if (!isClosing) {
+        console.log("Reconnecting in 3 seconds...");
+        reconnectTimeout = setTimeout(() => {
+          connectWebSocket();
+        }, 3000);
+      }
     });
   }
 
@@ -90,9 +134,6 @@ export function useAudioStreamRecorder(options?: {
     status.value = "connecting";
 
     try {
-      const url = wsUrl.value;
-      if (!url) throw new Error("Missing WebSocket URL");
-
       if (!navigator.mediaDevices?.getUserMedia) {
         throw new Error("getUserMedia is not supported in this browser");
       }
@@ -100,7 +141,27 @@ export function useAudioStreamRecorder(options?: {
         throw new Error("MediaRecorder is not supported in this browser");
       }
 
-      websocket = await openWebSocket(url);
+      // Ensure WebSocket is connected
+      if (!websocket || websocket.readyState !== WebSocket.OPEN) {
+        connectWebSocket();
+        // Wait for connection
+        await new Promise<void>((resolve, reject) => {
+          const checkInterval = setInterval(() => {
+            if (websocket && websocket.readyState === WebSocket.OPEN) {
+              clearInterval(checkInterval);
+              resolve();
+            } else if (wsStatus.value === "error") {
+              clearInterval(checkInterval);
+              reject(new Error("WebSocket connection failed"));
+            }
+          }, 100);
+          // Timeout after 10 seconds
+          setTimeout(() => {
+            clearInterval(checkInterval);
+            reject(new Error("WebSocket connection timeout"));
+          }, 10000);
+        });
+      }
 
       mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
@@ -132,6 +193,15 @@ export function useAudioStreamRecorder(options?: {
 
       mediaRecorder.start(timesliceMs.value);
       status.value = "recording";
+
+      // Send start action to server
+      if (websocket && websocket.readyState === WebSocket.OPEN) {
+        try {
+          websocket.send(JSON.stringify({ action: "start" }));
+        } catch {
+          // ignore send failures
+        }
+      }
     } catch (e) {
       error.value =
         e instanceof Error ? e.message : "Failed to start recording";
@@ -149,8 +219,7 @@ export function useAudioStreamRecorder(options?: {
       mediaStream = null;
       mediaRecorder = null;
 
-      closeWebSocket(websocket);
-      websocket = null;
+      // Don't close WebSocket anymore - keep it connected
     }
   }
 
@@ -178,27 +247,44 @@ export function useAudioStreamRecorder(options?: {
           }
         });
       }
+
+      // Send end action to server
+      if (websocket && websocket.readyState === WebSocket.OPEN) {
+        try {
+          websocket.send(JSON.stringify({ action: "end" }));
+        } catch {
+          // ignore send failures
+        }
+      }
     } finally {
       stopTracks(mediaStream);
       mediaStream = null;
       mediaRecorder = null;
 
-      closeWebSocket(websocket);
-      websocket = null;
+      // Don't close WebSocket - keep it connected
 
       status.value = "idle";
     }
   }
 
+  onMounted(() => {
+    // Connect WebSocket on mount
+    connectWebSocket();
+  });
+
   onBeforeUnmount(() => {
-    // If the component using this composable unmounts, stop everything.
+    // Stop recording and close WebSocket when component unmounts
+    isClosing = true;
     void stop();
+    closeWebSocket();
   });
 
   return {
     wsUrl,
     status,
+    wsStatus,
     error,
+    lastMessage,
     isRecording,
     start,
     stop,
