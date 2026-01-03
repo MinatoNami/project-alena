@@ -38,11 +38,16 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         await send({"type": "ready"})
 
         while True:
-            message = await ws.receive()
+            try:
+                message = await ws.receive()
+            except WebSocketDisconnect:
+                logger.info("WebSocket disconnected")
+                return
 
             if "bytes" in message and message["bytes"] is not None:
                 chunk: bytes = message["bytes"]
                 audio_buffer.extend(chunk)
+                logger.debug("Received audio chunk: %d bytes (total: %d bytes)", len(chunk), len(audio_buffer))
                 if len(audio_buffer) > settings.max_audio_bytes:
                     await send({"type": "error", "message": "max_audio_bytes exceeded"})
                     await ws.close(code=1009)
@@ -58,22 +63,26 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 continue
 
             if "text" in message and message["text"] is not None:
+                logger.debug("Received text message: %s", message["text"])
                 data = _safe_json_loads(message["text"])
                 if not data:
                     await send({"type": "error", "message": "invalid JSON message"})
                     continue
 
                 action = data.get("action")
+                logger.debug("Received action: %s", action)
                 if action == "ping":
                     await send({"type": "pong"})
                     continue
 
                 if action == "start":
                     audio_buffer.clear()
+                    logger.info("Started receiving audio bytes")
                     await send({"type": "ack", "event": "start"})
                     continue
 
                 if action == "end":
+                    logger.info("Stopped receiving audio bytes (total: %d bytes)", len(audio_buffer))
                     await send(
                         {"type": "ack", "event": "end", "bytes": len(audio_buffer)}
                     )
@@ -108,12 +117,13 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 await send({"type": "error", "message": f"unknown action: {action}"})
                 continue
 
-    except WebSocketDisconnect:
-        logger.info("WebSocket disconnected")
     except Exception as exc:  # best-effort error surface to client
         logger.exception("WebSocket error")
         try:
             await send({"type": "error", "message": str(exc)})
+        except Exception:
+            # Connection already closed, ignore
+            pass
         finally:
             try:
                 await ws.close(code=1011)

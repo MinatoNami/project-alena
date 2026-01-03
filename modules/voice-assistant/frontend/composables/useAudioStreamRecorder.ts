@@ -29,27 +29,14 @@ export function useAudioStreamRecorder(options?: {
   );
 
   let mediaStream: MediaStream | null = null;
-  let mediaRecorder: MediaRecorder | null = null;
+  let audioContext: AudioContext | null = null;
+  let scriptProcessor: ScriptProcessorNode | null = null;
   let websocket: WebSocket | null = null;
   let reconnectTimeout: NodeJS.Timeout | null = null;
   let isClosing = false;
 
   function resetError() {
     error.value = null;
-  }
-
-  function pickMimeType(): string | undefined {
-    if (!process.client) return undefined;
-    if (typeof MediaRecorder === "undefined") return undefined;
-    if (typeof MediaRecorder.isTypeSupported !== "function") return undefined;
-
-    const candidates = [
-      "audio/webm;codecs=opus",
-      "audio/webm",
-      "audio/ogg;codecs=opus",
-    ];
-
-    return candidates.find((type) => MediaRecorder.isTypeSupported(type));
   }
 
   function stopTracks(stream: MediaStream | null) {
@@ -137,9 +124,6 @@ export function useAudioStreamRecorder(options?: {
       if (!navigator.mediaDevices?.getUserMedia) {
         throw new Error("getUserMedia is not supported in this browser");
       }
-      if (typeof MediaRecorder === "undefined") {
-        throw new Error("MediaRecorder is not supported in this browser");
-      }
 
       // Ensure WebSocket is connected
       if (!websocket || websocket.readyState !== WebSocket.OPEN) {
@@ -165,33 +149,36 @@ export function useAudioStreamRecorder(options?: {
 
       mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
-      const mimeType = pickMimeType();
-      mediaRecorder = mimeType
-        ? new MediaRecorder(mediaStream, { mimeType })
-        : new MediaRecorder(mediaStream);
+      // Use Web Audio API for raw PCM capture
+      audioContext = new (window.AudioContext ||
+        (window as any).webkitAudioContext)();
+      const source = audioContext.createMediaStreamSource(mediaStream);
 
-      mediaRecorder.addEventListener("dataavailable", async (ev: BlobEvent) => {
+      // Create script processor for raw PCM data
+      // 4096 samples at 48kHz = ~85ms
+      scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+
+      scriptProcessor.onaudioprocess = (event: AudioProcessingEvent) => {
         if (!websocket || websocket.readyState !== WebSocket.OPEN) return;
-        if (!ev.data || ev.data.size === 0) return;
+
+        const inputData = event.inputBuffer.getChannelData(0);
+
+        // Convert float32 to PCM16
+        const pcm16 = new Int16Array(inputData.length);
+        for (let i = 0; i < inputData.length; i++) {
+          pcm16[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7fff;
+        }
 
         try {
-          const buf = await ev.data.arrayBuffer();
-          websocket.send(buf);
+          websocket.send(pcm16.buffer);
         } catch {
           // ignore per-chunk failures
         }
-      });
+      };
 
-      mediaRecorder.addEventListener("error", () => {
-        error.value = "Audio recorder error";
-        status.value = "error";
-      });
+      source.connect(scriptProcessor);
+      scriptProcessor.connect(audioContext.destination);
 
-      mediaRecorder.addEventListener("stop", () => {
-        // Best-effort cleanup is handled by stop()
-      });
-
-      mediaRecorder.start(timesliceMs.value);
       status.value = "recording";
 
       // Send start action to server
@@ -207,9 +194,9 @@ export function useAudioStreamRecorder(options?: {
         e instanceof Error ? e.message : "Failed to start recording";
       status.value = "error";
 
-      if (mediaRecorder && mediaRecorder.state !== "inactive") {
+      if (audioContext) {
         try {
-          mediaRecorder.stop();
+          audioContext.close();
         } catch {
           // ignore
         }
@@ -217,7 +204,8 @@ export function useAudioStreamRecorder(options?: {
 
       stopTracks(mediaStream);
       mediaStream = null;
-      mediaRecorder = null;
+      audioContext = null;
+      scriptProcessor = null;
 
       // Don't close WebSocket anymore - keep it connected
     }
@@ -233,19 +221,14 @@ export function useAudioStreamRecorder(options?: {
     status.value = "stopping";
 
     try {
-      if (mediaRecorder && mediaRecorder.state !== "inactive") {
-        await new Promise<void>((resolve) => {
-          const onStop = () => {
-            mediaRecorder?.removeEventListener("stop", onStop);
-            resolve();
-          };
-          mediaRecorder?.addEventListener("stop", onStop);
-          try {
-            mediaRecorder?.stop();
-          } catch {
-            resolve();
-          }
-        });
+      if (scriptProcessor) {
+        scriptProcessor.disconnect();
+        scriptProcessor = null;
+      }
+
+      if (audioContext) {
+        audioContext.close();
+        audioContext = null;
       }
 
       // Send end action to server
@@ -259,7 +242,6 @@ export function useAudioStreamRecorder(options?: {
     } finally {
       stopTracks(mediaStream);
       mediaStream = null;
-      mediaRecorder = null;
 
       // Don't close WebSocket - keep it connected
 

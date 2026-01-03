@@ -21,11 +21,14 @@ class Pipeline:
             )
 
     async def run(self, audio_wav_bytes: bytes) -> Dict[str, Any]:
+        logger.info("Pipeline: Starting transcription with %d bytes of audio", len(audio_wav_bytes))
         transcript = await self.stt.transcribe_wav_bytes(audio_wav_bytes)
         transcript_text = transcript.get("text", "").strip()
+        logger.info("Pipeline: Transcription complete: %s", transcript_text)
 
         prompt = transcript_text
         if not prompt:
+            logger.warning("Pipeline: Empty transcript, skipping LLM")
             return {"transcript": "", "llm_enabled": False, "prompt": ""}
 
         return {

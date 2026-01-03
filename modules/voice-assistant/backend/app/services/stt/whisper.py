@@ -1,12 +1,63 @@
 from __future__ import annotations
 
+import io
 from typing import Any, Dict, Optional
 
+import numpy as np
+
 from app.config import Settings
-from app.services.stt.audio import write_wav_bytes_to_tempfile
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+def load_audio_from_wav_bytes(wav_bytes: bytes) -> np.ndarray:
+    """Load audio from any audio format and return as numpy array."""
+    try:
+        from scipy.io import wavfile  # type: ignore
+        from app.services.stt.audio import is_wav_bytes, is_webm_bytes, webm_to_wav, raw_pcm_to_wav
+        
+        logger.debug("Loading audio: input size=%d bytes", len(wav_bytes))
+        
+        # Convert to WAV if needed
+        if is_webm_bytes(wav_bytes):
+            logger.debug("Detected webm format, converting to WAV")
+            wav_bytes = webm_to_wav(wav_bytes)
+            logger.debug("After webm conversion: %d bytes", len(wav_bytes))
+        elif not is_wav_bytes(wav_bytes):
+            logger.debug("Detected raw PCM, converting to WAV")
+            wav_bytes = raw_pcm_to_wav(wav_bytes)
+            logger.debug("After PCM conversion: %d bytes", len(wav_bytes))
+        
+        # Read WAV file from bytes
+        sample_rate, audio_data = wavfile.read(io.BytesIO(wav_bytes))
+        logger.debug("Loaded audio: sample_rate=%d, shape=%s, dtype=%s, min=%f, max=%f", 
+                    sample_rate, audio_data.shape, audio_data.dtype,
+                    float(np.min(audio_data)), float(np.max(audio_data)))
+        
+        # Convert to float32 and normalize if needed
+        if audio_data.dtype == np.int16:
+            audio_data = audio_data.astype(np.float32) / 32768.0
+        elif audio_data.dtype == np.int32:
+            audio_data = audio_data.astype(np.float32) / 2147483648.0
+        elif audio_data.dtype != np.float32:
+            audio_data = audio_data.astype(np.float32)
+        
+        logger.debug("After normalization: min=%f, max=%f, mean=%f", 
+                    float(np.min(audio_data)), float(np.max(audio_data)), float(np.mean(audio_data)))
+        
+        # Resample to 16kHz if needed (Whisper standard)
+        if sample_rate != 16000:
+            try:
+                import librosa  # type: ignore
+                audio_data = librosa.resample(audio_data, orig_sr=sample_rate, target_sr=16000)
+            except ImportError:
+                logger.warning("librosa not available; using audio at original sample rate %d Hz", sample_rate)
+        
+        return audio_data
+    except Exception as exc:
+        logger.error("Failed to load audio from bytes: %s", exc)
+        raise
 
 
 class WhisperSTT:
@@ -49,24 +100,43 @@ class WhisperSTT:
 
     async def transcribe_wav_bytes(self, audio_wav_bytes: bytes) -> Dict[str, Any]:
         self._ensure_model()
-        path = write_wav_bytes_to_tempfile(audio_wav_bytes)
+        
+        # Load audio directly from WAV bytes instead of using file path
+        audio_data = load_audio_from_wav_bytes(audio_wav_bytes)
 
         if self._backend == "faster-whisper":
-            segments, info = self._model.transcribe(str(path))
+            segments, info = self._model.transcribe(audio_data)
             text_parts = []
             for seg in segments:
                 if getattr(seg, "text", None):
                     text_parts.append(seg.text)
-            return {
+            text = "".join(text_parts).strip()
+            result = {
                 "backend": self._backend,
                 "language": getattr(info, "language", None),
-                "text": "".join(text_parts).strip(),
+                "text": text,
             }
+            logger.info(
+                "Transcribed audio via %s (lang: %s, audio_size: %d bytes): %s",
+                self._backend,
+                result["language"],
+                len(audio_wav_bytes),
+                text,
+            )
+            return result
 
         # openai-whisper
-        result = self._model.transcribe(str(path))
+        result = self._model.transcribe(audio_data)
+        text = (result.get("text") or "").strip()
+        logger.info(
+            "Transcribed audio via %s (lang: %s, audio_size: %d bytes): %s",
+            self._backend,
+            result.get("language"),
+            len(audio_wav_bytes),
+            text,
+        )
         return {
             "backend": self._backend,
             "language": result.get("language"),
-            "text": (result.get("text") or "").strip(),
+            "text": text,
         }

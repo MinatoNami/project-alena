@@ -1,9 +1,11 @@
+name: voice-assistant
+
 services:
   backend:
     build: .
     container_name: voice-backend
     ports:
-      - "8001:8001"
+      - "0.0.0.0:8001:8001"
     env_file:
       - .env
     environment:
@@ -13,3 +15,13 @@ services:
       - ./app:/app/app:ro
       - ./whisper-cache:/root/.cache
     gpus: all
+
+  # frontend:
+  #   build: ../frontend
+  #   container_name: voice-frontend
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     - NUXT_PUBLIC_WS_AUDIO_URL=ws://backend:8001
+  #   depends_on:
+  #     - backend
