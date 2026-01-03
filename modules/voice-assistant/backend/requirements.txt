@@ -4,10 +4,9 @@ pydantic-settings>=2.2
 httpx>=0.27
 
 # STT backends (install at least one)
-# Prefer faster-whisper when possible:
-# faster-whisper>=1.0.0
-# Fallback:
-openai-whisper>=20231117
+# Using faster-whisper for optimized performance:
+faster-whisper>=1.0.0
+openai-whisper>=20230314
 
 numpy>=1.24
 scipy>=1.10

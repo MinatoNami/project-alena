@@ -101,14 +101,18 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                             }
                         )
 
-                        full = ""
-                        async for delta in pipeline.ollama.stream_generate(
-                            prompt=prompt
-                        ):
-                            full += delta
-                            await send({"type": "llm", "delta": delta})
+                        try:
+                            full = ""
+                            async for delta in pipeline.ollama.stream_generate(
+                                prompt=prompt
+                            ):
+                                full += delta
+                                await send({"type": "llm", "delta": delta})
 
-                        await send({"type": "llm", "event": "end", "text": full})
+                            await send({"type": "llm", "event": "end", "text": full})
+                        except Exception as llm_exc:
+                            logger.error("LLM generation failed: %s", llm_exc)
+                            await send({"type": "llm", "event": "error", "message": str(llm_exc)})
                     else:
                         await send({"type": "llm", "event": "skipped"})
 
