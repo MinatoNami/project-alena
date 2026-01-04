@@ -47,7 +47,11 @@ async def websocket_endpoint(ws: WebSocket) -> None:
             if "bytes" in message and message["bytes"] is not None:
                 chunk: bytes = message["bytes"]
                 audio_buffer.extend(chunk)
-                logger.debug("Received audio chunk: %d bytes (total: %d bytes)", len(chunk), len(audio_buffer))
+                logger.debug(
+                    "Received audio chunk: %d bytes (total: %d bytes)",
+                    len(chunk),
+                    len(audio_buffer),
+                )
                 if len(audio_buffer) > settings.max_audio_bytes:
                     await send({"type": "error", "message": "max_audio_bytes exceeded"})
                     await ws.close(code=1009)
@@ -82,13 +86,39 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                     continue
 
                 if action == "end":
-                    logger.info("Stopped receiving audio bytes (total: %d bytes)", len(audio_buffer))
+                    logger.info(
+                        "Stopped receiving audio bytes (total: %d bytes)",
+                        len(audio_buffer),
+                    )
+
+                    # Validate minimum audio data
+                    if len(audio_buffer) < 1000:  # Less than 1KB is probably too short
+                        logger.warning(
+                            "Audio buffer too small: %d bytes", len(audio_buffer)
+                        )
+                        await send(
+                            {
+                                "type": "error",
+                                "message": f"Audio too short: {len(audio_buffer)} bytes. Please speak longer.",
+                            }
+                        )
+                        audio_buffer.clear()
+                        continue
+
                     await send(
                         {"type": "ack", "event": "end", "bytes": len(audio_buffer)}
                     )
 
-                    result = await pipeline.run(audio_wav_bytes=bytes(audio_buffer))
-                    await send({"type": "stt", "text": result.get("transcript", "")})
+                    try:
+                        result = await pipeline.run(audio_wav_bytes=bytes(audio_buffer))
+                        await send(
+                            {"type": "stt", "text": result.get("transcript", "")}
+                        )
+                    except Exception as stt_exc:
+                        logger.error("STT processing failed: %s", stt_exc)
+                        await send({"type": "stt", "text": "", "error": str(stt_exc)})
+                        audio_buffer.clear()
+                        continue
 
                     if result.get("llm_enabled") and pipeline.ollama is not None:
                         prompt = result.get("prompt", "")
@@ -112,7 +142,13 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                             await send({"type": "llm", "event": "end", "text": full})
                         except Exception as llm_exc:
                             logger.error("LLM generation failed: %s", llm_exc)
-                            await send({"type": "llm", "event": "error", "message": str(llm_exc)})
+                            await send(
+                                {
+                                    "type": "llm",
+                                    "event": "error",
+                                    "message": str(llm_exc),
+                                }
+                            )
                     else:
                         await send({"type": "llm", "event": "skipped"})
 

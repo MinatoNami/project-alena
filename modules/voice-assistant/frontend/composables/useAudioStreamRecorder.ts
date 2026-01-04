@@ -147,15 +147,27 @@ export function useAudioStreamRecorder(options?: {
         });
       }
 
-      mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Request audio with specific constraints for better quality
+      mediaStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          sampleRate: 16000, // Request 16kHz to match Whisper
+          channelCount: 1, // Mono audio
+        },
+      });
 
       // Use Web Audio API for raw PCM capture
+      // Force 16kHz sample rate to match Whisper expectations
       audioContext = new (window.AudioContext ||
-        (window as any).webkitAudioContext)();
+        (window as any).webkitAudioContext)({ sampleRate: 16000 });
       const source = audioContext.createMediaStreamSource(mediaStream);
 
+      console.log(`AudioContext sample rate: ${audioContext.sampleRate}Hz`);
+
       // Create script processor for raw PCM data
-      // 4096 samples at 48kHz = ~85ms
+      // 4096 samples at 16kHz = 256ms
       scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
 
       scriptProcessor.onaudioprocess = (event: AudioProcessingEvent) => {
@@ -163,10 +175,24 @@ export function useAudioStreamRecorder(options?: {
 
         const inputData = event.inputBuffer.getChannelData(0);
 
-        // Convert float32 to PCM16
+        // Check for silence or very low volume (potential issue)
+        let sumSquares = 0;
+        for (let i = 0; i < inputData.length; i++) {
+          sumSquares += inputData[i] * inputData[i];
+        }
+        const rms = Math.sqrt(sumSquares / inputData.length);
+
+        // Skip completely silent chunks
+        if (rms < 0.001) {
+          return;
+        }
+
+        // Convert float32 to PCM16 with proper clamping
         const pcm16 = new Int16Array(inputData.length);
         for (let i = 0; i < inputData.length; i++) {
-          pcm16[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7fff;
+          // Clamp to [-1, 1] and convert to int16 range
+          const clamped = Math.max(-1, Math.min(1, inputData[i]));
+          pcm16[i] = Math.round(clamped * 32767);
         }
 
         try {

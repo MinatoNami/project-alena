@@ -15,10 +15,15 @@ def load_audio_from_wav_bytes(wav_bytes: bytes) -> np.ndarray:
     """Load audio from any audio format and return as numpy array."""
     try:
         from scipy.io import wavfile  # type: ignore
-        from app.services.stt.audio import is_wav_bytes, is_webm_bytes, webm_to_wav, raw_pcm_to_wav
-        
+        from app.services.stt.audio import (
+            is_wav_bytes,
+            is_webm_bytes,
+            webm_to_wav,
+            raw_pcm_to_wav,
+        )
+
         logger.debug("Loading audio: input size=%d bytes", len(wav_bytes))
-        
+
         # Convert to WAV if needed
         if is_webm_bytes(wav_bytes):
             logger.debug("Detected webm format, converting to WAV")
@@ -28,13 +33,18 @@ def load_audio_from_wav_bytes(wav_bytes: bytes) -> np.ndarray:
             logger.debug("Detected raw PCM, converting to WAV")
             wav_bytes = raw_pcm_to_wav(wav_bytes)
             logger.debug("After PCM conversion: %d bytes", len(wav_bytes))
-        
+
         # Read WAV file from bytes
         sample_rate, audio_data = wavfile.read(io.BytesIO(wav_bytes))
-        logger.debug("Loaded audio: sample_rate=%d, shape=%s, dtype=%s, min=%f, max=%f", 
-                    sample_rate, audio_data.shape, audio_data.dtype,
-                    float(np.min(audio_data)), float(np.max(audio_data)))
-        
+        logger.debug(
+            "Loaded audio: sample_rate=%d, shape=%s, dtype=%s, min=%f, max=%f",
+            sample_rate,
+            audio_data.shape,
+            audio_data.dtype,
+            float(np.min(audio_data)),
+            float(np.max(audio_data)),
+        )
+
         # Convert to float32 and normalize if needed
         if audio_data.dtype == np.int16:
             audio_data = audio_data.astype(np.float32) / 32768.0
@@ -42,18 +52,44 @@ def load_audio_from_wav_bytes(wav_bytes: bytes) -> np.ndarray:
             audio_data = audio_data.astype(np.float32) / 2147483648.0
         elif audio_data.dtype != np.float32:
             audio_data = audio_data.astype(np.float32)
-        
-        logger.debug("After normalization: min=%f, max=%f, mean=%f", 
-                    float(np.min(audio_data)), float(np.max(audio_data)), float(np.mean(audio_data)))
-        
+
+        logger.debug(
+            "After normalization: min=%f, max=%f, mean=%f",
+            float(np.min(audio_data)),
+            float(np.max(audio_data)),
+            float(np.mean(audio_data)),
+        )
+
         # Resample to 16kHz if needed (Whisper standard)
         if sample_rate != 16000:
             try:
                 import librosa  # type: ignore
-                audio_data = librosa.resample(audio_data, orig_sr=sample_rate, target_sr=16000)
+
+                logger.info("Resampling from %d Hz to 16000 Hz", sample_rate)
+                audio_data = librosa.resample(
+                    audio_data, orig_sr=sample_rate, target_sr=16000
+                )
             except ImportError:
-                logger.warning("librosa not available; using audio at original sample rate %d Hz", sample_rate)
-        
+                logger.warning(
+                    "librosa not available; using audio at original sample rate %d Hz",
+                    sample_rate,
+                )
+
+        # Validate audio quality
+        audio_duration = len(audio_data) / 16000.0  # duration in seconds at 16kHz
+        audio_rms = float(np.sqrt(np.mean(audio_data**2)))
+
+        logger.info("Audio stats: duration=%.2fs, rms=%.4f", audio_duration, audio_rms)
+
+        # Warn if audio is too quiet or too short
+        if audio_rms < 0.001:
+            logger.warning(
+                "Audio RMS is very low (%.6f) - may be too quiet or silent", audio_rms
+            )
+
+        if audio_duration < 0.1:
+            logger.warning("Audio duration is very short (%.2fs)", audio_duration)
+
         return audio_data
     except Exception as exc:
         logger.error("Failed to load audio from bytes: %s", exc)
@@ -100,7 +136,7 @@ class WhisperSTT:
 
     async def transcribe_wav_bytes(self, audio_wav_bytes: bytes) -> Dict[str, Any]:
         self._ensure_model()
-        
+
         # Load audio directly from WAV bytes instead of using file path
         audio_data = load_audio_from_wav_bytes(audio_wav_bytes)
 
