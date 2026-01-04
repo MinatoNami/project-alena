@@ -23,6 +23,7 @@ RUN npm ci --omit=dev
 ENV NODE_ENV=production \
     NUXT_HOST=0.0.0.0 \
     NUXT_PORT=3000 \
+    NUXT_PUBLIC_OLLAMA_URL=http://10.8.0.1:11434 \
     NUXT_PUBLIC_WS_AUDIO_URL=ws://localhost:8001
 
 EXPOSE 3000

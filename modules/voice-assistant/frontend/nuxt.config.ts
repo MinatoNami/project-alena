@@ -1,12 +1,19 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
+import tailwindcss from "@tailwindcss/vite";
+
 export default defineNuxtConfig({
   compatibilityDate: "2025-07-15",
   devtools: { enabled: true },
+  css: ["./app/assets/css/main.css"],
   runtimeConfig: {
     public: {
+      ollamaUrl: process.env.NUXT_PUBLIC_OLLAMA_URL || "http://10.8.0.1:11434",
       wsAudioUrl:
-        process.env.NUXT_PUBLIC_WS_AUDIO_URL || "ws://192.168.0.10:8001/ws",
+        process.env.NUXT_PUBLIC_WS_AUDIO_URL || "wss://10.8.0.1:8001/ws",
     },
+  },
+  vite: {
+    plugins: [tailwindcss()],
   },
 
   modules: [

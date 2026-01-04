@@ -77,7 +77,7 @@ It combines **on-device LLMs**, **speech-to-text**, and **extensible MCP (Model 
 
 - **LLM Runtime:** Ollama (local)
 - **Speech-to-Text:** Whisper
-- **Frontend:** Vue / Nuxt (planned)
+- **Frontend:** Vue / Nuxt 4 + Tailwind v4 (@tailwindcss/vite) + @nuxt/ui
 - **Backend:** Python / Node.js (modular)
 - **Protocols:** MCP, WebSocket, WebRTC
 - **Deployment:** Local machine, homelab, edge GPU
@@ -105,6 +105,20 @@ python -m uvicorn app.main:app `
   --ssl-certfile certs/10.8.0.1+1.pem `
   --ssl-keyfile certs/10.8.0.1+1-key.pem
 ```
+
+---
+
+## Run (Voice Assistant frontend)
+
+From `modules/voice-assistant/frontend`:
+
+```bash
+npm install
+npm run dev
+```
+
+- Styling: Tailwind v4 via `@tailwindcss/vite`, global entry at `app/assets/css/main.css`.
+- UI kit: `@nuxt/ui` is enabled in `nuxt.config.ts`.
 
 ---
 
