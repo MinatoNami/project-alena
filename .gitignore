@@ -63,3 +63,6 @@ pnpm-debug.log*
 
 # ---- Misc ----
 .DS_Store?
+
+# ---- Certificates / Keys ----
+*.pem

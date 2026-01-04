@@ -34,6 +34,52 @@ Health check:
 
 - `GET http://localhost:8001/health`
 
+## SSL (local development)
+
+This backend can be run over HTTPS/WSS by providing a certificate and key.
+
+### Generate local `.pem` certs (mkcert)
+
+The filenames in the run command below match mkcert's output naming.
+
+1. Install mkcert (once):
+
+- Windows (Chocolatey):
+
+```powershell
+choco install mkcert
+mkcert -install
+```
+
+2. Generate the cert + key into `certs/`:
+
+```powershell
+cd modules/voice-assistant/backend
+mkdir certs -Force
+mkcert -cert-file certs/10.8.0.1+1.pem -key-file certs/10.8.0.1+1-key.pem 10.8.0.1 localhost 127.0.0.1
+```
+
+Notes:
+
+- `*.pem` is ignored via the repo root `.gitignore`.
+- If you previously committed any `.pem` files, untrack them with:
+
+```powershell
+git rm --cached -r -- **/*.pem
+```
+
+### Run with SSL (PowerShell)
+
+From `modules/voice-assistant/backend`:
+
+```powershell
+python -m uvicorn app.main:app `
+  --host 0.0.0.0 `
+  --port 8001 `
+  --ssl-certfile certs/10.8.0.1+1.pem `
+  --ssl-keyfile certs/10.8.0.1+1-key.pem
+```
+
 ## WebSocket protocol
 
 Endpoint:
@@ -63,7 +109,7 @@ Server responses (JSON):
 
 ## Environment variables
 
-- `LOG_LEVEL` (default `INFO`)
+- `LOG_LEVEL` (default `DEBUG`)
 - `MAX_AUDIO_BYTES` (default `25000000`)
 - `WHISPER_MODEL` (default `small`)
 - `WHISPER_DEVICE` (default `cpu`)

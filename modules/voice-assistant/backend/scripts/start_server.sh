@@ -21,7 +21,10 @@ source "$VENV_DIR/bin/activate"
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 
-UVICORN_ARGS=("app.main:app" "--host" "$HOST" "--port" "$PORT")
+CERT_FILE="${CERT_FILE:-certs/10.8.0.1+1.pem}"
+KEY_FILE="${KEY_FILE:-certs/10.8.0.1+1-key.pem}"
+
+UVICORN_ARGS=("app.main:app" "--host" "$HOST" "--port" "$PORT" "--ssl-certfile" "$CERT_FILE" "--ssl-keyfile" "$KEY_FILE")
 if [[ "$RELOAD" == "1" ]]; then
   UVICORN_ARGS+=("--reload")
 fi

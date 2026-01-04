@@ -94,6 +94,20 @@ It combines **on-device LLMs**, **speech-to-text**, and **extensible MCP (Model 
 
 ---
 
+## Run (Voice Assistant backend)
+
+From `modules/voice-assistant/backend` (PowerShell, with SSL):
+
+```powershell
+python -m uvicorn app.main:app `
+  --host 0.0.0.0 `
+  --port 8001 `
+  --ssl-certfile certs/10.8.0.1+1.pem `
+  --ssl-keyfile certs/10.8.0.1+1-key.pem
+```
+
+---
+
 ## 📌 Philosophy
 
 ALENA is designed as a **control plane for intelligence** — not just a chatbot.
