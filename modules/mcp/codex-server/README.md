@@ -11,7 +11,7 @@ Designed to integrate cleanly with agent planners (e.g. ALENA) and other MCP ser
 ## ✨ Features
 
 - 🚀 Direct invocation of **Codex CLI** via MCP tools
-- 🧠 Structured tools (`codex_generate`, `codex_edit`, `codex_explain`)
+- 🧠 Structured tools (`codex_generate`, `codex_edit`)
 - 🔒 No shell execution (safe subprocess calls)
 - 📂 Repository-scoped execution
 - 📦 Minimal dependencies
@@ -41,12 +41,12 @@ Designed to integrate cleanly with agent planners (e.g. ALENA) and other MCP ser
 ## 📁 Project Structure
 
 ```
-mcp-codex-app/
+modules/mcp/codex-server/
 ├── app/
 │   ├── __init__.py
-│   ├── main.py        # MCP server entrypoint
-│   ├── tools.py       # MCP tool definitions
-│   └── codex.py       # Codex CLI wrapper
+│   ├── main.py         # MCP server entrypoint
+│   ├── tools.py        # MCP tool definitions
+│   └── codex_runner.py # Codex CLI wrapper
 ├── requirements.txt
 └── README.md
 ```
@@ -63,25 +63,22 @@ mcp-codex-app/
 
 ## 🔧 Installation
 
-### 1. Clone the repository
-```bash
-git clone https://github.com/your-org/mcp-codex-app.git
-cd mcp-codex-app
-```
+### 1. Create a virtual environment
 
-### 2. Create a virtual environment
 ```bash
 python -m venv .venv
 source .venv/bin/activate   # Linux / macOS
 # .venv\Scripts\activate    # Windows
 ```
 
-### 3. Install dependencies
+### 2. Install dependencies
+
 ```bash
 pip install -r requirements.txt
 ```
 
-### 4. Verify Codex CLI
+### 3. Verify Codex CLI
+
 ```bash
 codex --help
 ```
@@ -101,6 +98,7 @@ The server will start and expose MCP tools over STDIO.
 ## 🧰 Available MCP Tools
 
 ### `codex_generate`
+
 Generate new code or content.
 
 ```json
@@ -115,6 +113,7 @@ Generate new code or content.
 ---
 
 ### `codex_edit`
+
 Modify an existing repository.
 
 ```json
@@ -128,18 +127,6 @@ Modify an existing repository.
 ```
 
 ---
-
-### `codex_explain`
-Explain a file or repository.
-
-```json
-{
-  "tool": "codex_explain",
-  "arguments": {
-    "path": "/home/user/repos/my-project"
-  }
-}
-```
 
 ---
 

@@ -73,3 +73,10 @@ bun run preview
 ```
 
 Check out the [deployment documentation](https://nuxt.com/docs/getting-started/deployment) for more information.
+
+## Environment
+
+Runtime config defaults live in `nuxt.config.ts`:
+
+- `NUXT_PUBLIC_OLLAMA_URL` (default `http://10.8.0.1:11434`)
+- `NUXT_PUBLIC_WS_AUDIO_URL` (default `wss://10.8.0.1:8000/ws`)

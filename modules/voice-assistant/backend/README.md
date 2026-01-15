@@ -20,7 +20,7 @@ pip install -r requirements.txt
 # or
 # pip install openai-whisper
 
-uvicorn app.main:app --reload --port 8001
+uvicorn app.main:app --reload --port 8000
 ```
 
 Or use the helper script:
@@ -32,7 +32,7 @@ chmod +x start_server.sh
 
 Health check:
 
-- `GET http://localhost:8001/health`
+- `GET http://localhost:8000/health`
 
 ## SSL (local development)
 
@@ -75,7 +75,7 @@ From `modules/voice-assistant/backend`:
 ```powershell
 python -m uvicorn app.main:app `
   --host 0.0.0.0 `
-  --port 8001 `
+  --port 8000 `
   --ssl-certfile certs/10.8.0.1+1.pem `
   --ssl-keyfile certs/10.8.0.1+1-key.pem
 ```
@@ -84,7 +84,7 @@ python -m uvicorn app.main:app `
 
 Endpoint:
 
-- `ws://localhost:8001/ws`
+- `ws://localhost:8000/ws`
 
 Messages:
 

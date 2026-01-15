@@ -94,6 +94,22 @@ It combines **on-device LLMs**, **speech-to-text**, and **extensible MCP (Model 
 
 ---
 
+## Run (ALENA CLI + MCP Codex server)
+
+From repo root:
+
+```bash
+pip install -r requirements.txt
+bash scripts/start_alena_with_mcp.sh
+```
+
+Environment variables:
+
+- `OLLAMA_HOST` (default `http://10.8.0.1:11434`)
+- `OLLAMA_MODEL` (default `gpt-oss:20b`)
+
+---
+
 ## Run (Voice Assistant backend)
 
 From `modules/voice-assistant/backend` (PowerShell, with SSL):
@@ -101,7 +117,7 @@ From `modules/voice-assistant/backend` (PowerShell, with SSL):
 ```powershell
 python -m uvicorn app.main:app `
   --host 0.0.0.0 `
-  --port 8001 `
+  --port 8000 `
   --ssl-certfile certs/10.8.0.1+1.pem `
   --ssl-keyfile certs/10.8.0.1+1-key.pem
 ```
