@@ -103,6 +103,17 @@ It combines **on-device LLMs**, **speech-to-text**, and **extensible MCP (Model 
 - **Protocols:** MCP, WebSocket, WebRTC
 - **Deployment:** Local machine, homelab, edge GPU
 
+## ✅ Requirements
+
+- Python 3.10+
+- Ollama (for local LLM runtime)
+- **Codex CLI** (used by the MCP Codex server). If you have access via your plan (e.g., ChatGPT Plus), install the Codex CLI and make sure it’s available in your `$PATH`.
+
+Notes:
+
+- The MCP Codex server uses the Codex CLI instead of calling the OpenAI API directly.
+- This enables local tool execution and avoids the need to wire an OpenAI API key for code-generation features.
+
 ---
 
 ## 🧭 Project Status
