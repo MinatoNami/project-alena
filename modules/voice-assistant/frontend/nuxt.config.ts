@@ -7,6 +7,10 @@ export default defineNuxtConfig({
   css: ["./app/assets/css/main.css"],
   runtimeConfig: {
     public: {
+      llmApiUrl:
+        process.env.NUXT_PUBLIC_LLM_API_URL ||
+        process.env.NUXT_PUBLIC_OLLAMA_URL ||
+        "http://localhost:8001",
       ollamaUrl: process.env.NUXT_PUBLIC_OLLAMA_URL || "http://localhost:11434",
       wsAudioUrl:
         process.env.NUXT_PUBLIC_WS_AUDIO_URL || "ws://localhost:8000/ws",

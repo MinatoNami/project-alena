@@ -138,7 +138,7 @@ async def run_agent(
 
         emit(
             "❌ Ollama returned an empty response. "
-            "Check OLLAMA_HOST/OLLAMA_MODEL/OLLAMA_TIMEOUT or enable OLLAMA_DEBUG=1."
+            "Check OLLAMA_BASE_URL/OLLAMA_MODEL/OLLAMA_TIMEOUT or enable OLLAMA_DEBUG=1."
         )
         return done()
 

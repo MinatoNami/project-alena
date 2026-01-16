@@ -1,9 +1,7 @@
 import os
-import time
-import json
-import requests
 
 from modules.core.controller.logger import logger
+from modules.ollama import OllamaChatClient, OllamaConfig
 
 SYSTEM_PROMPT = """You are ALENA, an AI planner.
 
@@ -42,57 +40,23 @@ Do NOT return empty responses.
 """
 
 
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL") or os.getenv(
+    "OLLAMA_HOST", "http://localhost:11434"
+)
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gpt-oss:20b")
 OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "120"))
 OLLAMA_DEBUG = os.getenv("OLLAMA_DEBUG", "0") == "1"
 
 
 def ask_ollama(messages):
-    payload = {
-        "model": OLLAMA_MODEL,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            *messages,
-        ],
-        "stream": False,
-    }
-
-    for attempt in range(2):
-        response = requests.post(
-            f"{OLLAMA_HOST}/api/chat",
-            json=payload,
-            timeout=OLLAMA_TIMEOUT,
-        )
-
-        response.raise_for_status()
-        data = response.json()
-        if OLLAMA_DEBUG:
-            logger.info("OLLAMA_RAW_RESPONSE: %s", data)
-        message = data.get("message", {}) if isinstance(data, dict) else {}
-        content = message.get("content") or ""
-        if content.strip():
-            return content
-
-        tool_calls = message.get("tool_calls")
-        if isinstance(tool_calls, list) and tool_calls:
-            first = tool_calls[0] or {}
-            function = first.get("function") or {}
-            name = function.get("name")
-            arguments = function.get("arguments", {})
-            if name:
-                tool_payload = {
-                    "tool": name,
-                    "arguments": arguments,
-                }
-                return json.dumps(tool_payload)
-
-        logger.warning("OLLAMA_EMPTY_RESPONSE: %s", data)
-        fallback = data.get("response")
-        if isinstance(fallback, str) and fallback.strip():
-            return fallback
-
-        if attempt == 0:
-            time.sleep(0.5)
-
-    return ""
+    config = OllamaConfig(
+        base_url=OLLAMA_BASE_URL,
+        model=OLLAMA_MODEL,
+        timeout_s=OLLAMA_TIMEOUT,
+        debug=OLLAMA_DEBUG,
+    )
+    client = OllamaChatClient(config)
+    response = client.chat(messages, system_prompt=SYSTEM_PROMPT)
+    if OLLAMA_DEBUG:
+        logger.info("OLLAMA_RAW_RESPONSE: %s", response)
+    return response

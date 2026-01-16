@@ -154,7 +154,8 @@ const draftMessage = ref("");
 const chatError = ref("");
 const chatLoading = ref(false);
 const config = useRuntimeConfig();
-const ollamaUrl = config.public.ollamaUrl;
+const llmApiUrl =
+  (config.public as any).llmApiUrl || (config.public as any).ollamaUrl;
 const chatScrollEl = ref<HTMLElement | null>(null);
 
 function persistMessages() {
@@ -229,7 +230,7 @@ async function sendMessage() {
   await scrollToBottom();
 
   try {
-    const response = await fetch(`${ollamaUrl}/api/chat`, {
+    const response = await fetch(`${llmApiUrl}/api/chat`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

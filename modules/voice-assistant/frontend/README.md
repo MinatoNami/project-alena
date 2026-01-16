@@ -78,7 +78,8 @@ Check out the [deployment documentation](https://nuxt.com/docs/getting-started/d
 
 Runtime config defaults live in `nuxt.config.ts`:
 
-- `NUXT_PUBLIC_OLLAMA_URL` (default `http://localhost:11434`)
+- `NUXT_PUBLIC_LLM_API_URL` (default `http://localhost:8001`)
+- `NUXT_PUBLIC_OLLAMA_URL` (default `http://localhost:11434`, fallback only)
 - `NUXT_PUBLIC_WS_AUDIO_URL` (default `ws://localhost:8000/ws`)
 
 You can set these in the repo root `.env` before running the frontend.

@@ -48,19 +48,37 @@ It combines **on-device LLMs**, **speech-to-text**, and **extensible MCP (Model 
 ## 🏗️ High-Level Architecture
 
 ```
-[ Web / Mobile UI ]                [ Telegram ]
-  │                               │
-  ▼                               ▼
-[ Audio Stream (WS / WebRTC) ]   [ Telegram Bot ]
-  │                               │
-  ▼                               ▼
-[ Speech-to-Text (Whisper) ]      [ Controller (FastAPI) ]
-  │                               │
-  ▼                               ▼
-[ Local LLM (Ollama) ]             [ MCP Control Plane ]
-  │                               ├─ Codex MCP
-  ▼                               └─ Other MCP tools
-[ MCP Control Plane ]
+[ ALENA CLI (alena.py) ]
+          │
+          ▼
+    [ Core Agent Loop ] ───────────────┐
+          │                             │
+          ▼                             ▼
+ [ Local LLM (Ollama) ]        [ Tool Executor ]
+                                      │
+                                      ▼
+                              [ MCP Codex Server ]
+                                      │
+                                      ▼
+                                 [ Codex CLI ]
+                                      │
+                                      ▼
+                               [ Repo / Files ]
+
+[ Web / Mobile UI ] ──WS──> [ Voice Assistant Backend ]
+                               │
+                               ▼
+                       [ Whisper STT ]
+                               │
+                               ▼
+                        [ LLM Router ]
+                          │       │
+                          │       └──> [ ALENA Controller (FastAPI) ] ──> [ Core Agent Loop ]
+                          └───────────> [ Local LLM (Ollama) ]
+
+[ Telegram Bot ] ───────────────> [ ALENA Controller (FastAPI) ]
+      │
+      └── voice ──WS──> [ Remote Whisper STT ]
 ```
 
 ---
@@ -108,8 +126,28 @@ bash scripts/start_alena_with_mcp.sh
 
 Environment variables:
 
-- `OLLAMA_HOST` (default `http://localhost:11434`)
+- `OLLAMA_BASE_URL` (default `http://localhost:11434`)
 - `OLLAMA_MODEL` (default `gpt-oss:20b`)
+- `OLLAMA_TIMEOUT` (default `120`)
+
+All services read from the repo root `.env` (see `.env.example`).
+
+---
+
+## Run (Controller API + MCP Codex server)
+
+Use this if another service (Voice Assistant or Telegram bot) needs the controller API.
+
+```bash
+bash scripts/start_controller_with_mcp.sh
+```
+
+Environment variables:
+
+- `ALENA_CONTROLLER_URL` (default `http://localhost:9000`)
+- `OLLAMA_BASE_URL` (default `http://localhost:11434`)
+- `OLLAMA_MODEL` (default `gpt-oss:20b`)
+- `OLLAMA_TIMEOUT` (default `120`)
 
 All services read from the repo root `.env` (see `.env.example`).
 
@@ -126,6 +164,12 @@ python -m uvicorn app.main:app `
   --ssl-certfile certs/server.pem `
   --ssl-keyfile certs/server-key.pem
 ```
+
+Key environment variables:
+
+- `LLM_ROUTE` (`ollama` or `alena`)
+- `ALENA_CONTROLLER_URL` (used when `LLM_ROUTE=alena`)
+- `OLLAMA_BASE_URL` (used when `LLM_ROUTE=ollama`)
 
 ---
 

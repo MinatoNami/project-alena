@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     ollama_enabled: bool = True
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "llama3.1"
+    ollama_timeout: float = 120.0
 
     # LLM routing
     llm_route: str = "ollama"  # ollama|alena

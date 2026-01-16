@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from urllib.parse import urlparse
 from typing import Dict, Optional
 
 from fastapi import FastAPI
@@ -72,6 +73,14 @@ app = create_app()
 if __name__ == "__main__":
     import uvicorn
 
-    host = os.getenv("ALENA_CONTROLLER_HOST", "0.0.0.0")
-    port = int(os.getenv("ALENA_CONTROLLER_PORT", "9000"))
+    host = os.getenv("ALENA_CONTROLLER_HOST")
+    port = os.getenv("ALENA_CONTROLLER_PORT")
+    if host or port:
+        host = host or "0.0.0.0"
+        port = int(port or "9000")
+    else:
+        controller_url = os.getenv("ALENA_CONTROLLER_URL", "http://localhost:9000")
+        parsed = urlparse(controller_url)
+        host = parsed.hostname or "0.0.0.0"
+        port = int(parsed.port or 9000)
     uvicorn.run("modules.core.server.main:app", host=host, port=port, reload=False)
