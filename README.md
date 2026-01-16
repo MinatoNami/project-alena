@@ -33,32 +33,34 @@ It combines **on-device LLMs**, **speech-to-text**, and **extensible MCP (Model 
   - Designed for rapid iteration
 
 - 🔒 **Privacy-First by Design**
+
   - Data stays local by default
   - Optional external integrations
   - Ideal for home labs, edge devices, and private deployments
+
+- 🤖 **Telegram Bot Gateway**
+  - Bi-directional chat relay to groups
+  - Voice messages → Whisper → controller response
+  - Optional reply in source chat or private DM
 
 ---
 
 ## 🏗️ High-Level Architecture
 
 ```
-[ Web / Mobile UI ]
-        │
-        ▼
-[ Audio Stream (WS / WebRTC) ]
-        │
-        ▼
-[ Speech-to-Text (Whisper) ]
-        │
-        ▼
-[ Local LLM (Ollama) ]
-        │
-        ▼
+[ Web / Mobile UI ]                [ Telegram ]
+  │                               │
+  ▼                               ▼
+[ Audio Stream (WS / WebRTC) ]   [ Telegram Bot ]
+  │                               │
+  ▼                               ▼
+[ Speech-to-Text (Whisper) ]      [ Controller (FastAPI) ]
+  │                               │
+  ▼                               ▼
+[ Local LLM (Ollama) ]             [ MCP Control Plane ]
+  │                               ├─ Codex MCP
+  ▼                               └─ Other MCP tools
 [ MCP Control Plane ]
-   ├─ Calendar MCP
-   ├─ Reminder MCP
-   ├─ System MCP
-   ├─ Web / Data MCP
 ```
 
 ---
@@ -70,6 +72,7 @@ It combines **on-device LLMs**, **speech-to-text**, and **extensible MCP (Model 
 - Smart home / IoT orchestration
 - Developer productivity assistant
 - Robotics & edge-AI control plane
+- Telegram group assistant (text + voice)
 
 ---
 
@@ -125,6 +128,29 @@ python -m uvicorn app.main:app `
 ---
 
 ## Run (Voice Assistant frontend)
+
+-
+
+## Run (Telegram Bot → Controller)
+
+From repo root:
+
+```bash
+bash scripts/start_telegram_with_controller_mcp.sh
+```
+
+Configure in `modules/telegram/.env`:
+
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_TARGET_CHAT_ID`
+- `TELEGRAM_CONTROLLER_ENABLED=true`
+- `TELEGRAM_CONTROLLER_URL=http://localhost:9000`
+
+Optional:
+
+- `TELEGRAM_SOURCE_CHAT_IDS` (restrict listening)
+- `TELEGRAM_ECHO_IN_TARGET` (allow echo in target)
+- `TELEGRAM_REPLY_IN_SOURCE` (reply in source chat)
 
 From `modules/voice-assistant/frontend`:
 

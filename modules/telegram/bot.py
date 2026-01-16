@@ -8,6 +8,7 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
+import httpx
 from telegram import Update
 from telegram.constants import ChatType
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
@@ -162,18 +163,57 @@ class TelegramWhisperBot:
         self,
         context: ContextTypes.DEFAULT_TYPE,
         source_chat_id: int,
+        source_chat_type: Optional[str],
+        source_user_id: Optional[int],
         payload: str,
     ) -> None:
-        await context.bot.send_message(
-            chat_id=self.config.target_chat_id,
-            text=payload,
-        )
+        sent_to_target = False
+        if self.config.target_chat_id != source_chat_id:
+            await context.bot.send_message(
+                chat_id=self.config.target_chat_id,
+                text=payload,
+            )
+            sent_to_target = True
+
+        if not sent_to_target and source_chat_type in {"group", "supergroup"}:
+            if source_user_id is not None:
+                await context.bot.send_message(
+                    chat_id=source_user_id,
+                    text=payload,
+                )
 
         if self.config.reply_in_source and source_chat_id != self.config.target_chat_id:
             await context.bot.send_message(
                 chat_id=source_chat_id,
                 text=payload,
             )
+
+    async def _call_controller(self, prompt: str, session_id: Optional[str]) -> str:
+        if not self.config.controller_enabled:
+            return ""
+
+        base_url = self.config.controller_url.rstrip("/")
+        if not base_url:
+            return ""
+
+        url = f"{base_url}/generate"
+        payload = {"prompt": prompt}
+        if session_id:
+            payload["session_id"] = session_id
+
+        try:
+            timeout = httpx.Timeout(self.config.controller_timeout)
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.post(url, json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+                if isinstance(data, dict):
+                    return str(data.get("response") or "")
+        except Exception as exc:
+            LOGGER.exception("Controller request failed")
+            return f"Controller error: {exc}"
+
+        return ""
 
     async def handle_text(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -196,7 +236,25 @@ class TelegramWhisperBot:
             message.message_id,
         )
         payload = f"{sender}: {message.text}"
-        await self._forward_payload(context, message.chat_id, payload)
+        await self._forward_payload(
+            context,
+            message.chat_id,
+            update.effective_chat.type if update.effective_chat else None,
+            update.effective_user.id if update.effective_user else None,
+            payload,
+        )
+
+        session_id = str(message.chat_id)
+        controller_response = await self._call_controller(
+            prompt=message.text,
+            session_id=session_id,
+        )
+        if controller_response:
+            await context.bot.send_message(
+                chat_id=message.chat_id,
+                text=controller_response,
+                reply_to_message_id=message.message_id,
+            )
 
     async def handle_voice(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -247,7 +305,26 @@ class TelegramWhisperBot:
         else:
             payload = f"{sender}: (no speech detected)"
 
-        await self._forward_payload(context, message.chat_id, payload)
+        await self._forward_payload(
+            context,
+            message.chat_id,
+            update.effective_chat.type if update.effective_chat else None,
+            update.effective_user.id if update.effective_user else None,
+            payload,
+        )
+
+        if text:
+            session_id = str(message.chat_id)
+            controller_response = await self._call_controller(
+                prompt=text,
+                session_id=session_id,
+            )
+            if controller_response:
+                await context.bot.send_message(
+                    chat_id=message.chat_id,
+                    text=controller_response,
+                    reply_to_message_id=message.message_id,
+                )
 
     async def run(self) -> None:
         application = ApplicationBuilder().token(self.config.token).build()

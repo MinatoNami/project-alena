@@ -20,6 +20,10 @@ TELEGRAM_TARGET_CHAT_ID=-1001234567890
 # TELEGRAM_ECHO_IN_TARGET=true
 # Optional: reply back in source chat
 # TELEGRAM_REPLY_IN_SOURCE=true
+# Optional: pipe messages to controller and reply with response
+# TELEGRAM_CONTROLLER_ENABLED=true
+# TELEGRAM_CONTROLLER_URL=http://localhost:9000
+# TELEGRAM_CONTROLLER_TIMEOUT=120
 ```
 
 5. Run the bot:
