@@ -77,6 +77,9 @@ async def run_agent(
     user_input: str,
     memory: Optional[ConversationMemory] = None,
     tool_executor: Optional[Callable] = None,
+    *,
+    output_sink: Optional[Callable[[str], None]] = None,
+    return_output: bool = False,
 ):
     memory = memory or _memory
     tool_executor = tool_executor or execute_tool
@@ -84,6 +87,20 @@ async def run_agent(
     explicit_codex_request = "codex" in text and (
         "use" in text or "using" in text or "tool" in text
     )
+
+    final_message: Optional[str] = None
+    outputs: list[str] = []
+
+    def emit(message: str) -> None:
+        nonlocal outputs
+        if output_sink is not None:
+            output_sink(message)
+        else:
+            print(message)
+        outputs.append(message)
+
+    def done() -> Optional[str]:
+        return final_message if return_output else None
 
     # 1️⃣ Ask Ollama
     history = memory.get_messages()
@@ -107,22 +124,23 @@ async def run_agent(
             intents = infer_intents(user_input)
             if not explicit_codex_request and not tool_can_handle(tool, intents):
                 logger.warning(f"Tool '{tool}' cannot satisfy intents {intents}")
-                print(
+                emit(
                     "❌ I cannot complete this request with the available tools.\n"
                     "Reason: required capability is missing."
                 )
-                return
+                return done()
 
             result = await tool_executor(SERVER, tool, arguments)
             normalized = normalize_codex_output(result.content)
-            print("\n✅ Final answer:\n", normalized["message"])
-            return
+            final_message = normalized["message"]
+            emit("\n✅ Final answer:\n" + final_message)
+            return done()
 
-        print(
+        emit(
             "❌ Ollama returned an empty response. "
             "Check OLLAMA_HOST/OLLAMA_MODEL/OLLAMA_TIMEOUT or enable OLLAMA_DEBUG=1."
         )
-        return
+        return done()
 
     # 2️⃣ Tool loop: allow multiple tool calls
     max_tool_steps = int(os.getenv("ALENA_MAX_TOOL_STEPS", "3"))
@@ -139,19 +157,21 @@ async def run_agent(
                 arguments = {"repo_path": ".", "question": user_input}
                 if not explicit_codex_request and not tool_can_handle(tool, intents):
                     logger.warning(f"Tool '{tool}' cannot satisfy intents {intents}")
-                    print(
+                    emit(
                         "❌ I cannot complete this request with the available tools.\n"
                         "Reason: required capability is missing."
                     )
-                    return
+                    return done()
                 result = await tool_executor(SERVER, tool, arguments)
                 normalized = normalize_codex_output(result.content)
-                print("\n✅ Final answer:\n", normalized["message"])
-                return
+                final_message = normalized["message"]
+                emit("\n✅ Final answer:\n" + final_message)
+                return done()
 
             memory.add_assistant(current_response)
-            print("✅ Final answer:\n", current_response)
-            return
+            final_message = current_response
+            emit("✅ Final answer:\n" + final_message)
+            return done()
 
         intents = infer_intents(user_input)
         if "access_filesystem" in intents and not explicit_codex_request:
@@ -165,8 +185,9 @@ async def run_agent(
             result = await tool_executor(SERVER, tool, arguments)
             normalized = normalize_codex_output(result.content)
             memory.add_tool_result(tool, normalized["message"])
-            print("\n✅ Final answer:\n", normalized["message"])
-            return
+            final_message = normalized["message"]
+            emit("\n✅ Final answer:\n" + final_message)
+            return done()
 
         # Tool request detected
         tool = parsed.get("tool")
@@ -209,11 +230,11 @@ async def run_agent(
 
         if not explicit_codex_request and not tool_can_handle(tool, intents):
             logger.warning(f"Tool '{tool}' cannot satisfy intents {intents}")
-            print(
+            emit(
                 "❌ I cannot complete this request with the available tools.\n"
                 "Reason: required capability is missing."
             )
-            return
+            return done()
 
         if tool == "codex_edit" and isinstance(arguments, dict):
             if "repo_path" not in arguments or not arguments.get("repo_path"):
@@ -256,8 +277,8 @@ async def run_agent(
 
         tool_steps += 1
         if tool_steps >= max_tool_steps:
-            print("❌ Reached tool step limit. Please refine the request or try again.")
-            return
+            emit("❌ Reached tool step limit. Please refine the request or try again.")
+            return done()
 
         followup = (
             "Use the tool result above to continue. "
@@ -270,3 +291,5 @@ async def run_agent(
                 {"role": "user", "content": followup},
             ]
         )
+
+    return done()

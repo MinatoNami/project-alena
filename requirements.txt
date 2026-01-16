@@ -1,6 +1,9 @@
 pytest
 pytest-asyncio
 mcp
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pydantic>=2.6
 
 # Telegram Bot API library
 python-telegram-bot>=20.7

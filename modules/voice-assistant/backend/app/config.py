@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "llama3.1"
 
+    # LLM routing
+    llm_route: str = "ollama"  # ollama|alena
+    alena_controller_url: str = "http://localhost:9000"
+    alena_controller_timeout: float = 120.0
+
     # CORS (useful if you connect from a browser)
     cors_allow_origins: List[str] = ["*"]
 
