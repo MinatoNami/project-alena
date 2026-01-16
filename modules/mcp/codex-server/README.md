@@ -11,7 +11,7 @@ Designed to integrate cleanly with agent planners (e.g. ALENA) and other MCP ser
 ## ✨ Features
 
 - 🚀 Direct invocation of **Codex CLI** via MCP tools
-- 🧠 Structured tools (`codex_generate`, `codex_edit`)
+- 🧠 Structured tools (`codex_generate`, `codex_edit`, `codex_summarize`, `codex_doc_outline`, `codex_test_plan`)
 - 🔒 No shell execution (safe subprocess calls)
 - 📂 Repository-scoped execution
 - 📦 Minimal dependencies
@@ -47,7 +47,8 @@ modules/mcp/codex-server/
 │   ├── main.py         # MCP server entrypoint
 │   ├── tools.py        # MCP tool definitions
 │   └── codex_runner.py # Codex CLI wrapper
-├── requirements.txt
+├── tests/              # Unit tests for tool wiring and prompts
+├── test_mcp.py          # Sample MCP client script
 └── README.md
 ```
 
@@ -95,6 +96,24 @@ The server will start and expose MCP tools over STDIO.
 
 ---
 
+## 🧪 Testing
+
+Unit tests validate prompt construction, tool wiring, and Codex CLI invocation logic without spawning real processes.
+
+From repo root:
+
+```bash
+pytest modules/mcp/codex-server/tests -v
+```
+
+Manual smoke test using the sample client (requires Codex CLI in PATH):
+
+```bash
+python modules/mcp/codex-server/test_mcp.py
+```
+
+---
+
 ## 🧰 Available MCP Tools
 
 ### `codex_generate`
@@ -112,6 +131,87 @@ Generate new code or content.
 
 ---
 
+### `codex_plan`
+
+Produce a multi-step plan and file-level strategy for a complex task.
+
+```json
+{
+  "tool": "codex_plan",
+  "arguments": {
+    "repo_path": "/home/user/repos/my-project",
+    "goal": "Add rate limiting to the public API"
+  }
+}
+```
+
+---
+
+### `codex_analyze`
+
+Analyze a repository question without modifying files.
+
+```json
+{
+  "tool": "codex_analyze",
+  "arguments": {
+    "repo_path": "/home/user/repos/my-project",
+    "question": "Where is authentication enforced and how is it configured?"
+  }
+}
+```
+
+---
+
+### `codex_summarize`
+
+Summarize the repository or a specific focus area.
+
+```json
+{
+  "tool": "codex_summarize",
+  "arguments": {
+    "repo_path": "/home/user/repos/my-project",
+    "focus": "architecture and data flow"
+  }
+}
+```
+
+---
+
+### `codex_doc_outline`
+
+Draft a documentation outline for a given topic and audience.
+
+```json
+{
+  "tool": "codex_doc_outline",
+  "arguments": {
+    "repo_path": "/home/user/repos/my-project",
+    "topic": "Authentication and authorization",
+    "audience": "backend engineers"
+  }
+}
+```
+
+---
+
+### `codex_test_plan`
+
+Produce a test plan for validating a feature or change.
+
+```json
+{
+  "tool": "codex_test_plan",
+  "arguments": {
+    "repo_path": "/home/user/repos/my-project",
+    "goal": "New password reset flow"
+  }
+}
+```
+
+---
+
 ### `codex_edit`
 
 Modify an existing repository.
@@ -122,6 +222,23 @@ Modify an existing repository.
   "arguments": {
     "repo_path": "/home/user/repos/my-project",
     "instruction": "Refactor the logging system to use structured JSON logs"
+  }
+}
+```
+
+---
+
+### `codex_refactor`
+
+Perform a multi-file refactor with optional constraints.
+
+```json
+{
+  "tool": "codex_refactor",
+  "arguments": {
+    "repo_path": "/home/user/repos/my-project",
+    "goal": "Split the monolithic service into smaller modules",
+    "constraints": "Keep public interfaces stable"
   }
 }
 ```

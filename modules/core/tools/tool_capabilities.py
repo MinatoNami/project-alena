@@ -23,6 +23,41 @@ TOOL_CAPABILITIES = {
         can_access_time=False,
         can_access_network=False,
     ),
+    "codex_plan": ToolCapabilities(
+        name="codex_plan",
+        can_execute_code=False,
+        can_access_time=False,
+        can_access_network=False,
+        can_read_files=True,
+    ),
+    "codex_analyze": ToolCapabilities(
+        name="codex_analyze",
+        can_execute_code=False,
+        can_access_time=False,
+        can_access_network=False,
+        can_read_files=True,
+    ),
+    "codex_summarize": ToolCapabilities(
+        name="codex_summarize",
+        can_execute_code=False,
+        can_access_time=False,
+        can_access_network=False,
+        can_read_files=True,
+    ),
+    "codex_doc_outline": ToolCapabilities(
+        name="codex_doc_outline",
+        can_execute_code=False,
+        can_access_time=False,
+        can_access_network=False,
+        can_read_files=True,
+    ),
+    "codex_test_plan": ToolCapabilities(
+        name="codex_test_plan",
+        can_execute_code=False,
+        can_access_time=False,
+        can_access_network=False,
+        can_read_files=True,
+    ),
     "codex_edit": ToolCapabilities(
         name="codex_edit",
         can_edit_files=True,
@@ -31,7 +66,16 @@ TOOL_CAPABILITIES = {
         can_access_network=False,
         can_read_files=True,
     ),
+    "codex_refactor": ToolCapabilities(
+        name="codex_refactor",
+        can_edit_files=True,
+        can_execute_code=False,
+        can_access_time=False,
+        can_access_network=False,
+        can_read_files=True,
+    ),
 }
+
 
 def tool_can_handle(tool_name: str, intents: set) -> bool:
     caps = TOOL_CAPABILITIES.get(tool_name)
@@ -44,6 +88,7 @@ def tool_can_handle(tool_name: str, intents: set) -> bool:
         "access_network": caps.can_access_network,
         "generate_code": caps.can_generate_code,
         "edit_files": caps.can_edit_files,
+        "access_filesystem": caps.can_read_files or caps.can_execute_code,
     }
 
     for intent in intents:
@@ -51,4 +96,3 @@ def tool_can_handle(tool_name: str, intents: set) -> bool:
             return False
 
     return True
-

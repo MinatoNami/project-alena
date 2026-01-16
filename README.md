@@ -138,6 +138,16 @@ npm run dev
 
 ---
 
+## 🧪 Testing
+
+From repo root:
+
+```bash
+pytest -v
+```
+
+---
+
 ## 📌 Philosophy
 
 ALENA is designed as a **control plane for intelligence** — not just a chatbot.
