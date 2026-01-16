@@ -1,29 +1,7 @@
-TOOLS = {
-    "codex_generate": {
-        "required_args": ["prompt"],
-    },
-    "codex_plan": {
-        "required_args": ["repo_path", "goal"],
-    },
-    "codex_analyze": {
-        "required_args": ["repo_path", "question"],
-    },
-    "codex_summarize": {
-        "required_args": ["repo_path"],
-    },
-    "codex_doc_outline": {
-        "required_args": ["repo_path", "topic"],
-    },
-    "codex_test_plan": {
-        "required_args": ["repo_path", "goal"],
-    },
-    "codex_edit": {
-        "required_args": ["repo_path", "instruction"],
-    },
-    "codex_refactor": {
-        "required_args": ["repo_path", "goal"],
-    },
-}
+from .tool_definitions import get_tool_registry
+
+# Auto-generated from centralized tool definitions
+TOOLS = get_tool_registry()
 
 
 def validate_tool_call(tool_call: dict):

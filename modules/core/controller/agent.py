@@ -7,23 +7,37 @@ from types import SimpleNamespace
 from modules.core.controller.ollama_client import ask_ollama
 from modules.core.controller.normalize import normalize_codex_output
 from modules.core.controller.tool_executor import execute_tool
+from modules.core.controller.tool_definitions import get_tool_by_name
 from modules.core.tools.tool_capabilities import tool_can_handle
 from modules.core.controller.normalize import normalize_codex_output
 from modules.core.controller.logger import logger
 from modules.core.controller.memory import get_default_memory, ConversationMemory
 
-SERVER = SimpleNamespace(
-    command="python",
-    args=["-m", "app.main"],
-    # Process settings
-    cwd=os.path.join(os.path.dirname(__file__), "..", "..", "mcp", "codex-server"),
-    env=None,
-    # Text decoding settings expected by mcp.client.stdio
-    encoding="utf-8",
-    encoding_error_handler="replace",  # ✅ required
-    # Optional but safe (prevents future attr errors across versions)
-    stderr_to_stdout=False,
-)
+
+def _build_server_config(mcp_server_key: str) -> SimpleNamespace:
+    base_dir = os.path.join(os.path.dirname(__file__), "..", "..", "mcp")
+    # Map logical server key to folder name
+    if mcp_server_key == "codex":
+        folder = "codex-server"
+    else:
+        folder = mcp_server_key
+
+    return SimpleNamespace(
+        command="python",
+        args=["-m", "app.main"],
+        cwd=os.path.abspath(os.path.join(base_dir, folder)),
+        env=None,
+        encoding="utf-8",
+        encoding_error_handler="replace",
+        stderr_to_stdout=False,
+    )
+
+
+def _get_server_for_tool(tool_name: str) -> SimpleNamespace:
+    tool_def = get_tool_by_name(tool_name)
+    # Default to codex if unknown (keeps backward-compatibility)
+    server_key = tool_def.mcp_server if tool_def else "codex"
+    return _build_server_config(server_key)
 
 
 def infer_intents(user_input: str) -> Set[str]:
@@ -130,7 +144,7 @@ async def run_agent(
                 )
                 return done()
 
-            result = await tool_executor(SERVER, tool, arguments)
+            result = await tool_executor(_get_server_for_tool(tool), tool, arguments)
             normalized = normalize_codex_output(result.content)
             final_message = normalized["message"]
             emit("\n✅ Final answer:\n" + final_message)
@@ -162,7 +176,9 @@ async def run_agent(
                         "Reason: required capability is missing."
                     )
                     return done()
-                result = await tool_executor(SERVER, tool, arguments)
+                result = await tool_executor(
+                    _get_server_for_tool(tool), tool, arguments
+                )
                 normalized = normalize_codex_output(result.content)
                 final_message = normalized["message"]
                 emit("\n✅ Final answer:\n" + final_message)
@@ -182,7 +198,7 @@ async def run_agent(
                 "question": (f"Current working directory is: {cwd}. " f"{user_input}"),
             }
             memory.add_tool_call(tool, arguments)
-            result = await tool_executor(SERVER, tool, arguments)
+            result = await tool_executor(_get_server_for_tool(tool), tool, arguments)
             normalized = normalize_codex_output(result.content)
             memory.add_tool_result(tool, normalized["message"])
             final_message = normalized["message"]
@@ -226,7 +242,30 @@ async def run_agent(
                     "instruction": prompt,
                 }
 
+        # Normalize mis-scoped tool names like "codex_create_event" -> "create_event"
+        if (
+            not get_tool_by_name(tool)
+            and isinstance(tool, str)
+            and tool.startswith("codex_")
+        ):
+            candidate = tool[len("codex_") :]
+            if get_tool_by_name(candidate):
+                logger.info(f"Normalizing tool name '{tool}' -> '{candidate}'")
+                tool = candidate
+
         logger.info(f"TOOL_REQUEST: tool={tool} arguments={arguments}")
+
+        # Preprocess datetime arguments for Google Calendar tools
+        if tool and tool.startswith("google_") and isinstance(arguments, dict):
+            timezone_offset = os.getenv("CALENDAR_TIMEZONE_OFFSET", "+08:00")
+            for key in ["start_time", "end_time"]:
+                if key in arguments and isinstance(arguments[key], str):
+                    # Strip 'Z' (UTC indicator) and add configured timezone offset
+                    if arguments[key].endswith("Z"):
+                        arguments[key] = arguments[key][:-1] + timezone_offset
+                        logger.info(
+                            f"Preprocessed {key}: replaced 'Z' with {timezone_offset}"
+                        )
 
         if not explicit_codex_request and not tool_can_handle(tool, intents):
             logger.warning(f"Tool '{tool}' cannot satisfy intents {intents}")
@@ -271,7 +310,7 @@ async def run_agent(
                     )
 
         memory.add_tool_call(tool, arguments)
-        result = await tool_executor(SERVER, tool, arguments)
+        result = await tool_executor(_get_server_for_tool(tool), tool, arguments)
         normalized = normalize_codex_output(result.content)
         memory.add_tool_result(tool, normalized["message"])
 

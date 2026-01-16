@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from typing import Set
+from modules.core.controller.tool_definitions import get_tool_capabilities_dict
 
 
 @dataclass(frozen=True)
@@ -15,65 +16,10 @@ class ToolCapabilities:
     can_read_files: bool = False
 
 
+# Auto-generated from centralized tool definitions
+_caps_dict = get_tool_capabilities_dict()
 TOOL_CAPABILITIES = {
-    "codex_generate": ToolCapabilities(
-        name="codex_generate",
-        can_generate_code=True,
-        can_execute_code=False,
-        can_access_time=False,
-        can_access_network=False,
-    ),
-    "codex_plan": ToolCapabilities(
-        name="codex_plan",
-        can_execute_code=False,
-        can_access_time=False,
-        can_access_network=False,
-        can_read_files=True,
-    ),
-    "codex_analyze": ToolCapabilities(
-        name="codex_analyze",
-        can_execute_code=False,
-        can_access_time=False,
-        can_access_network=False,
-        can_read_files=True,
-    ),
-    "codex_summarize": ToolCapabilities(
-        name="codex_summarize",
-        can_execute_code=False,
-        can_access_time=False,
-        can_access_network=False,
-        can_read_files=True,
-    ),
-    "codex_doc_outline": ToolCapabilities(
-        name="codex_doc_outline",
-        can_execute_code=False,
-        can_access_time=False,
-        can_access_network=False,
-        can_read_files=True,
-    ),
-    "codex_test_plan": ToolCapabilities(
-        name="codex_test_plan",
-        can_execute_code=False,
-        can_access_time=False,
-        can_access_network=False,
-        can_read_files=True,
-    ),
-    "codex_edit": ToolCapabilities(
-        name="codex_edit",
-        can_edit_files=True,
-        can_execute_code=False,
-        can_access_time=False,
-        can_access_network=False,
-        can_read_files=True,
-    ),
-    "codex_refactor": ToolCapabilities(
-        name="codex_refactor",
-        can_edit_files=True,
-        can_execute_code=False,
-        can_access_time=False,
-        can_access_network=False,
-        can_read_files=True,
-    ),
+    name: ToolCapabilities(**caps) for name, caps in _caps_dict.items()
 }
 
 
