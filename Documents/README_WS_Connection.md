@@ -28,6 +28,7 @@ FastAPI Gateway (Windows, TLS)
 ```
 
 Key properties:
+
 - No port forwarding
 - No ngrok required
 - Ollama & Whisper remain private
@@ -38,12 +39,14 @@ Key properties:
 ## Prerequisites
 
 ### Mac
+
 - Node.js
 - Nuxt 3
 - WireGuard client
 - mkcert
 
 ### Windows
+
 - Python 3.10+
 - FastAPI + Uvicorn
 - WireGuard
@@ -58,14 +61,16 @@ Key properties:
 Ensure both machines are connected via WireGuard.
 
 Example IPs:
+
 ```
-Windows: 10.8.0.1
-Mac:     10.8.0.2
+Windows: <WIREGUARD_SERVER_IP>
+Mac:     <WIREGUARD_CLIENT_IP>
 ```
 
 Test from Mac:
+
 ```bash
-ping 10.8.0.1
+ping <WIREGUARD_SERVER_IP>
 ```
 
 ---
@@ -75,11 +80,13 @@ ping 10.8.0.1
 ### On Windows
 
 Generate cert for WireGuard IP:
+
 ```powershell
-mkcert 10.8.0.1
+mkcert <WIREGUARD_SERVER_IP>
 ```
 
 Find CA root:
+
 ```powershell
 mkcert -CAROOT
 ```
@@ -91,6 +98,7 @@ Copy `rootCA.pem` to the Mac.
 ### On Mac
 
 Trust the Windows mkcert CA:
+
 ```bash
 sudo security add-trusted-cert \
   -d -r trustRoot \
@@ -127,10 +135,10 @@ async def ws_endpoint(ws: WebSocket):
 
 ```powershell
 python -m uvicorn app.main:app \
-  --host 0.0.0.0 \
+  --host <BIND_HOST> \
   --port 8001 \
-  --ssl-certfile certs/10.8.0.1+1.pem \
-  --ssl-keyfile certs/10.8.0.1+1-key.pem
+  --ssl-certfile certs/server.pem \
+  --ssl-keyfile certs/server-key.pem
 ```
 
 ⚠️ Do NOT use `--reload` with SSL on Windows.  
@@ -155,19 +163,20 @@ netsh advfirewall firewall add rule \
 ### From Mac browser
 
 ```text
-https://10.8.0.1:8001/health
+https://<WIREGUARD_SERVER_IP>:8001/health
 ```
 
 Expected:
+
 ```json
-{"ok": true}
+{ "ok": true }
 ```
 
 ### WebSocket test
 
 ```bash
 npm install -g wscat
-wscat -n -c wss://10.8.0.1:8001/ws
+wscat -n -c wss://<WIREGUARD_SERVER_IP>:8001/ws
 ```
 
 ---
@@ -177,19 +186,19 @@ wscat -n -c wss://10.8.0.1:8001/ws
 ### Environment variable
 
 ```env
-NUXT_PUBLIC_WS_URL=wss://10.8.0.1:8001/ws
+NUXT_PUBLIC_WS_URL=wss://<WIREGUARD_SERVER_IP>:8001/ws
 ```
 
 ### Client-side connection
 
 ```ts
 onMounted(() => {
-  const ws = new WebSocket(import.meta.env.NUXT_PUBLIC_WS_URL)
+  const ws = new WebSocket(import.meta.env.NUXT_PUBLIC_WS_URL);
 
-  ws.onopen = () => console.log("WSS connected")
-  ws.onmessage = e => console.log(e.data)
-  ws.onerror = e => console.error(e)
-})
+  ws.onopen = () => console.log("WSS connected");
+  ws.onmessage = (e) => console.log(e.data);
+  ws.onerror = (e) => console.error(e);
+});
 ```
 
 ⚠️ Always run WebSocket code client-side only.

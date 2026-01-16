@@ -7,9 +7,9 @@ export default defineNuxtConfig({
   css: ["./app/assets/css/main.css"],
   runtimeConfig: {
     public: {
-      ollamaUrl: process.env.NUXT_PUBLIC_OLLAMA_URL || "http://10.8.0.1:11434",
+      ollamaUrl: process.env.NUXT_PUBLIC_OLLAMA_URL || "http://localhost:11434",
       wsAudioUrl:
-        process.env.NUXT_PUBLIC_WS_AUDIO_URL || "wss://10.8.0.1:8000/ws",
+        process.env.NUXT_PUBLIC_WS_AUDIO_URL || "ws://localhost:8000/ws",
     },
   },
   vite: {

@@ -42,7 +42,7 @@ Do NOT return empty responses.
 """
 
 
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://192.168.0.10:11434")
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gpt-oss:20b")
 OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT", "120"))
 OLLAMA_DEBUG = os.getenv("OLLAMA_DEBUG", "0") == "1"

@@ -30,6 +30,8 @@ chmod +x start_server.sh
 ./start_server.sh
 ```
 
+Configuration is read from the repo root `.env` (see `.env.example`).
+
 Health check:
 
 - `GET http://localhost:8000/health`
@@ -56,7 +58,7 @@ mkcert -install
 ```powershell
 cd modules/voice-assistant/backend
 mkdir certs -Force
-mkcert -cert-file certs/10.8.0.1+1.pem -key-file certs/10.8.0.1+1-key.pem 10.8.0.1 localhost 127.0.0.1
+mkcert -cert-file certs/server.pem -key-file certs/server-key.pem localhost
 ```
 
 Notes:
@@ -74,10 +76,10 @@ From `modules/voice-assistant/backend`:
 
 ```powershell
 python -m uvicorn app.main:app `
-  --host 0.0.0.0 `
+  --host localhost `
   --port 8000 `
-  --ssl-certfile certs/10.8.0.1+1.pem `
-  --ssl-keyfile certs/10.8.0.1+1-key.pem
+  --ssl-certfile certs/server.pem `
+  --ssl-keyfile certs/server-key.pem
 ```
 
 ## WebSocket protocol
@@ -117,3 +119,6 @@ Server responses (JSON):
 - `OLLAMA_ENABLED` (default `true`)
 - `OLLAMA_BASE_URL` (default `http://localhost:11434`)
 - `OLLAMA_MODEL` (default `llama3.1`)
+- `LLM_ROUTE` (default `ollama`)
+- `ALENA_CONTROLLER_URL` (default `http://localhost:9000`)
+- `ALENA_CONTROLLER_TIMEOUT` (default `120`)
