@@ -68,100 +68,100 @@ class ToolDefinition:
 
 TOOL_DEFINITIONS = [
     # Codex MCP Server Tools
-    # ToolDefinition(
-    #     name="codex_generate",
-    #     description="Generate code based on a prompt",
-    #     mcp_server="codex",
-    #     required_args=[
-    #         ToolArgument("prompt", "string", description="Code generation prompt")
-    #     ],
-    #     capabilities=[ToolCapability.GENERATE_CODE],
-    # ),
-    # ToolDefinition(
-    #     name="codex_plan",
-    #     description="Create a development plan for a repository",
-    #     mcp_server="codex",
-    #     required_args=[
-    #         ToolArgument("repo_path", "string", description="Path to repository"),
-    #         ToolArgument("goal", "string", description="Development goal"),
-    #     ],
-    #     capabilities=[ToolCapability.READ_FILES],
-    # ),
-    # ToolDefinition(
-    #     name="codex_analyze",
-    #     description="Analyze code in a repository",
-    #     mcp_server="codex",
-    #     required_args=[
-    #         ToolArgument("repo_path", "string", description="Path to repository"),
-    #         ToolArgument("question", "string", description="Analysis question"),
-    #     ],
-    #     capabilities=[ToolCapability.READ_FILES],
-    # ),
-    # ToolDefinition(
-    #     name="codex_summarize",
-    #     description="Summarize code in a repository",
-    #     mcp_server="codex",
-    #     required_args=[
-    #         ToolArgument("repo_path", "string", description="Path to repository")
-    #     ],
-    #     optional_args=[
-    #         ToolArgument("focus", "string", required=False, description="Focus area")
-    #     ],
-    #     capabilities=[ToolCapability.READ_FILES],
-    # ),
-    # ToolDefinition(
-    #     name="codex_doc_outline",
-    #     description="Generate documentation outline for a repository",
-    #     mcp_server="codex",
-    #     required_args=[
-    #         ToolArgument("repo_path", "string", description="Path to repository"),
-    #         ToolArgument("topic", "string", description="Documentation topic"),
-    #     ],
-    #     optional_args=[
-    #         ToolArgument(
-    #             "audience", "string", required=False, description="Target audience"
-    #         )
-    #     ],
-    #     capabilities=[ToolCapability.READ_FILES],
-    # ),
-    # ToolDefinition(
-    #     name="codex_test_plan",
-    #     description="Create a test plan for a repository",
-    #     mcp_server="codex",
-    #     required_args=[
-    #         ToolArgument("repo_path", "string", description="Path to repository"),
-    #         ToolArgument("goal", "string", description="Testing goal"),
-    #     ],
-    #     capabilities=[ToolCapability.READ_FILES],
-    # ),
-    # ToolDefinition(
-    #     name="codex_edit",
-    #     description="Edit files in a repository",
-    #     mcp_server="codex",
-    #     required_args=[
-    #         ToolArgument("repo_path", "string", description="Path to repository"),
-    #         ToolArgument("instruction", "string", description="Edit instruction"),
-    #     ],
-    #     capabilities=[ToolCapability.EDIT_FILES, ToolCapability.READ_FILES],
-    # ),
-    # ToolDefinition(
-    #     name="codex_refactor",
-    #     description="Refactor code in a repository",
-    #     mcp_server="codex",
-    #     required_args=[
-    #         ToolArgument("repo_path", "string", description="Path to repository"),
-    #         ToolArgument("goal", "string", description="Refactoring goal"),
-    #     ],
-    #     optional_args=[
-    #         ToolArgument(
-    #             "constraints",
-    #             "string",
-    #             required=False,
-    #             description="Refactoring constraints",
-    #         )
-    #     ],
-    #     capabilities=[ToolCapability.EDIT_FILES, ToolCapability.READ_FILES],
-    # ),
+    ToolDefinition(
+        name="codex_generate",
+        description="Generate code based on a prompt",
+        mcp_server="codex",
+        required_args=[
+            ToolArgument("prompt", "string", description="Code generation prompt")
+        ],
+        capabilities=[ToolCapability.GENERATE_CODE],
+    ),
+    ToolDefinition(
+        name="codex_plan",
+        description="Create a development plan for a repository",
+        mcp_server="codex",
+        required_args=[
+            ToolArgument("repo_path", "string", description="Path to repository"),
+            ToolArgument("goal", "string", description="Development goal"),
+        ],
+        capabilities=[ToolCapability.READ_FILES],
+    ),
+    ToolDefinition(
+        name="codex_analyze",
+        description="Analyze code in a repository",
+        mcp_server="codex",
+        required_args=[
+            ToolArgument("repo_path", "string", description="Path to repository"),
+            ToolArgument("question", "string", description="Analysis question"),
+        ],
+        capabilities=[ToolCapability.READ_FILES],
+    ),
+    ToolDefinition(
+        name="codex_summarize",
+        description="Summarize code in a repository",
+        mcp_server="codex",
+        required_args=[
+            ToolArgument("repo_path", "string", description="Path to repository")
+        ],
+        optional_args=[
+            ToolArgument("focus", "string", required=False, description="Focus area")
+        ],
+        capabilities=[ToolCapability.READ_FILES],
+    ),
+    ToolDefinition(
+        name="codex_doc_outline",
+        description="Generate documentation outline for a repository",
+        mcp_server="codex",
+        required_args=[
+            ToolArgument("repo_path", "string", description="Path to repository"),
+            ToolArgument("topic", "string", description="Documentation topic"),
+        ],
+        optional_args=[
+            ToolArgument(
+                "audience", "string", required=False, description="Target audience"
+            )
+        ],
+        capabilities=[ToolCapability.READ_FILES],
+    ),
+    ToolDefinition(
+        name="codex_test_plan",
+        description="Create a test plan for a repository",
+        mcp_server="codex",
+        required_args=[
+            ToolArgument("repo_path", "string", description="Path to repository"),
+            ToolArgument("goal", "string", description="Testing goal"),
+        ],
+        capabilities=[ToolCapability.READ_FILES],
+    ),
+    ToolDefinition(
+        name="codex_edit",
+        description="Edit files in a repository",
+        mcp_server="codex",
+        required_args=[
+            ToolArgument("repo_path", "string", description="Path to repository"),
+            ToolArgument("instruction", "string", description="Edit instruction"),
+        ],
+        capabilities=[ToolCapability.EDIT_FILES, ToolCapability.READ_FILES],
+    ),
+    ToolDefinition(
+        name="codex_refactor",
+        description="Refactor code in a repository",
+        mcp_server="codex",
+        required_args=[
+            ToolArgument("repo_path", "string", description="Path to repository"),
+            ToolArgument("goal", "string", description="Refactoring goal"),
+        ],
+        optional_args=[
+            ToolArgument(
+                "constraints",
+                "string",
+                required=False,
+                description="Refactoring constraints",
+            )
+        ],
+        capabilities=[ToolCapability.EDIT_FILES, ToolCapability.READ_FILES],
+    ),
     # Google Calendar MCP Server Tools
     ToolDefinition(
         name="google_list_events",
