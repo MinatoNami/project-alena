@@ -33,32 +33,34 @@ It combines **on-device LLMs**, **speech-to-text**, and **extensible MCP (Model 
   - Designed for rapid iteration
 
 - 🔒 **Privacy-First by Design**
+
   - Data stays local by default
   - Optional external integrations
   - Ideal for home labs, edge devices, and private deployments
+
+- 🤖 **Telegram Bot Gateway**
+  - Bi-directional chat relay to groups
+  - Voice messages → Whisper → controller response
+  - Optional reply in source chat or private DM
 
 ---
 
 ## 🏗️ High-Level Architecture
 
 ```
-[ Web / Mobile UI ]
-        │
-        ▼
-[ Audio Stream (WS / WebRTC) ]
-        │
-        ▼
-[ Speech-to-Text (Whisper) ]
-        │
-        ▼
-[ Local LLM (Ollama) ]
-        │
-        ▼
+[ Web / Mobile UI ]                [ Telegram ]
+  │                               │
+  ▼                               ▼
+[ Audio Stream (WS / WebRTC) ]   [ Telegram Bot ]
+  │                               │
+  ▼                               ▼
+[ Speech-to-Text (Whisper) ]      [ Controller (FastAPI) ]
+  │                               │
+  ▼                               ▼
+[ Local LLM (Ollama) ]             [ MCP Control Plane ]
+  │                               ├─ Codex MCP
+  ▼                               └─ Other MCP tools
 [ MCP Control Plane ]
-   ├─ Calendar MCP
-   ├─ Reminder MCP
-   ├─ System MCP
-   ├─ Web / Data MCP
 ```
 
 ---
@@ -70,6 +72,7 @@ It combines **on-device LLMs**, **speech-to-text**, and **extensible MCP (Model 
 - Smart home / IoT orchestration
 - Developer productivity assistant
 - Robotics & edge-AI control plane
+- Telegram group assistant (text + voice)
 
 ---
 
@@ -105,8 +108,10 @@ bash scripts/start_alena_with_mcp.sh
 
 Environment variables:
 
-- `OLLAMA_HOST` (default `http://10.8.0.1:11434`)
+- `OLLAMA_HOST` (default `http://localhost:11434`)
 - `OLLAMA_MODEL` (default `gpt-oss:20b`)
+
+All services read from the repo root `.env` (see `.env.example`).
 
 ---
 
@@ -116,10 +121,10 @@ From `modules/voice-assistant/backend` (PowerShell, with SSL):
 
 ```powershell
 python -m uvicorn app.main:app `
-  --host 0.0.0.0 `
+  --host localhost `
   --port 8000 `
-  --ssl-certfile certs/10.8.0.1+1.pem `
-  --ssl-keyfile certs/10.8.0.1+1-key.pem
+  --ssl-certfile certs/server.pem `
+  --ssl-keyfile certs/server-key.pem
 ```
 
 ---
@@ -135,6 +140,29 @@ npm run dev
 
 - Styling: Tailwind v4 via `@tailwindcss/vite`, global entry at `app/assets/css/main.css`.
 - UI kit: `@nuxt/ui` is enabled in `nuxt.config.ts`.
+
+## Run (Telegram Bot → Controller)
+
+From repo root:
+
+```bash
+bash scripts/start_telegram_with_controller_mcp.sh
+```
+
+Configure in the repo root `.env`:
+
+- `TELEGRAM_BOT_TOKEN`
+- `TELEGRAM_TARGET_CHAT_ID`
+- `TELEGRAM_CONTROLLER_ENABLED=true`
+- `TELEGRAM_CONTROLLER_URL=http://localhost:9000`
+
+Optional:
+
+- `TELEGRAM_SOURCE_CHAT_IDS` (restrict listening)
+- `TELEGRAM_ECHO_IN_TARGET` (allow echo in target)
+- `TELEGRAM_REPLY_IN_SOURCE` (reply in source chat)
+- `TELEGRAM_STT_WS_URL` (remote Whisper WebSocket)
+- `TELEGRAM_STT_SSL_VERIFY` (set `false` for self-signed certs)
 
 ---
 
