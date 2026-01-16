@@ -27,6 +27,7 @@ def _safe_json_loads(text: str) -> Optional[Dict[str, Any]]:
 async def websocket_endpoint(ws: WebSocket) -> None:
     settings = get_settings()
     pipeline = Pipeline(settings=settings)
+    route = (settings.llm_route or "ollama").lower()
 
     await ws.accept()
     audio_buffer = bytearray()
@@ -120,7 +121,11 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                         audio_buffer.clear()
                         continue
 
-                    if result.get("llm_enabled") and pipeline.ollama is not None:
+                    if (
+                        route == "ollama"
+                        and result.get("llm_enabled")
+                        and pipeline.ollama is not None
+                    ):
                         prompt = result.get("prompt", "")
                         await send(
                             {
@@ -142,6 +147,30 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                             await send({"type": "llm", "event": "end", "text": full})
                         except Exception as llm_exc:
                             logger.error("LLM generation failed: %s", llm_exc)
+                            await send(
+                                {
+                                    "type": "llm",
+                                    "event": "error",
+                                    "message": str(llm_exc),
+                                }
+                            )
+                    elif route == "alena" and pipeline.alena is not None:
+                        prompt = result.get("prompt", "")
+                        await send(
+                            {
+                                "type": "llm",
+                                "event": "start",
+                                "model": "alena-controller",
+                                "prompt": prompt,
+                            }
+                        )
+                        try:
+                            text = await pipeline.alena.generate(prompt=prompt)
+                            if text:
+                                await send({"type": "llm", "delta": text})
+                            await send({"type": "llm", "event": "end", "text": text})
+                        except Exception as llm_exc:
+                            logger.error("ALENA generation failed: %s", llm_exc)
                             await send(
                                 {
                                     "type": "llm",
