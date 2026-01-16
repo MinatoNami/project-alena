@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 
 from modules.core.controller.logger import logger
 from modules.ollama import OllamaChatClient, OllamaConfig
@@ -6,7 +7,12 @@ from modules.core.controller.tool_definitions import (
     generate_system_prompt_tools_section,
 )
 
+# Get current date and time
+_current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
 SYSTEM_PROMPT = f"""You are ALENA, an AI planner.
+
+Current Date and Time: {_current_datetime}
 
 Rules:
 - You do NOT execute code.

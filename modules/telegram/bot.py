@@ -132,8 +132,14 @@ class TelegramWhisperBot:
         )
 
         if WhisperSTT is not None and Settings is not None:
-            settings = Settings()
-            self._stt = WhisperSTT(settings)
+            try:
+                settings = Settings()
+                self._stt = WhisperSTT(settings)
+            except Exception as e:
+                LOGGER.warning(f"Could not initialize Whisper STT: {e}")
+                self._stt = None
+        else:
+            self._stt = None
 
     def _should_forward(self, chat_id: int) -> bool:
         if chat_id == self.config.target_chat_id and not self.config.echo_in_target:

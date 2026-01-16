@@ -5,6 +5,7 @@ Handles authentication and calendar operations
 
 import os
 import pickle
+import logging
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from pathlib import Path
@@ -17,6 +18,13 @@ from googleapiclient.errors import HttpError
 
 # If modifying these scopes, delete the file token.pickle.
 SCOPES = ["https://www.googleapis.com/auth/calendar"]
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+)
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 class GoogleCalendarClient:
@@ -90,21 +98,71 @@ class GoogleCalendarClient:
 
         Args:
             calendar_id: Calendar ID (default: primary)
-            start_date: Start date in ISO format (YYYY-MM-DD)
-            end_date: End date in ISO format (YYYY-MM-DD)
+            start_date: Start date in ISO format (YYYY-MM-DD) in user's timezone
+            end_date: End date in ISO format (YYYY-MM-DD) in user's timezone
             max_results: Maximum number of events to return
 
         Returns:
             List of events
         """
         try:
+            from datetime import timedelta
+            from zoneinfo import ZoneInfo
+
+            # Get timezone offset from environment or use UTC
+            tz_name = self.timezone if self.timezone != "UTC" else "UTC"
+
             # Convert dates to RFC3339 format if provided
+            # Dates are provided in user's local timezone
             time_min = None
             time_max = None
             if start_date:
-                time_min = f"{start_date}T00:00:00Z"
+                # Handle both YYYY-MM-DD and full datetime strings
+                # Strip 'Z' suffix if present and extract just the date part
+                date_str = start_date.replace("Z", "").split("T")[0]
+                # Parse as naive datetime in user's timezone
+                date_obj = datetime.fromisoformat(date_str)
+                # Subtract 1 day to expand search window
+                date_obj = date_obj - timedelta(days=1)
+
+                # Create timezone-aware datetime at midnight in user's timezone
+                try:
+                    tz = ZoneInfo(tz_name)
+                    aware_dt = date_obj.replace(hour=0, minute=0, second=0, tzinfo=tz)
+                except Exception:
+                    # Fallback to UTC if timezone parsing fails
+                    aware_dt = date_obj.replace(
+                        hour=0, minute=0, second=0, tzinfo=ZoneInfo("UTC")
+                    )
+
+                # Convert to UTC
+                utc_dt = aware_dt.astimezone(ZoneInfo("UTC"))
+                time_min = utc_dt.isoformat().replace("+00:00", "Z")
+
             if end_date:
-                time_max = f"{end_date}T23:59:59Z"
+                # Handle both YYYY-MM-DD and full datetime strings
+                # Strip 'Z' suffix if present and extract just the date part
+                date_str = end_date.replace("Z", "").split("T")[0]
+                # Parse as naive datetime in user's timezone
+                date_obj = datetime.fromisoformat(date_str)
+                # Add 1 day to expand search window
+                date_obj = date_obj + timedelta(days=1)
+
+                # Create timezone-aware datetime at end of day in user's timezone
+                try:
+                    tz = ZoneInfo(tz_name)
+                    aware_dt = date_obj.replace(
+                        hour=23, minute=59, second=59, tzinfo=tz
+                    )
+                except Exception:
+                    # Fallback to UTC if timezone parsing fails
+                    aware_dt = date_obj.replace(
+                        hour=23, minute=59, second=59, tzinfo=ZoneInfo("UTC")
+                    )
+
+                # Convert to UTC
+                utc_dt = aware_dt.astimezone(ZoneInfo("UTC"))
+                time_max = utc_dt.isoformat().replace("+00:00", "Z")
 
             events_result = (
                 self.service.events()
@@ -115,9 +173,14 @@ class GoogleCalendarClient:
                     maxResults=max_results,
                     singleEvents=True,
                     orderBy="startTime",
+                    timeZone=self.timezone,
                 )
                 .execute()
             )
+
+            log_msg = f"Google Calendar API list query - calendarId={calendar_id}, timeMin={time_min}, timeMax={time_max}, results={len(events_result.get('items', []))} events"
+            logger.info(log_msg)
+            print(f"[CALENDAR_CLIENT] {log_msg}")
 
             events = events_result.get("items", [])
             return self._format_events(events)
@@ -167,6 +230,10 @@ class GoogleCalendarClient:
                 .execute()
             )
 
+            log_msg = f"Google Calendar API create event - calendarId={calendar_id}, eventId={created_event.get('id')}, summary={title}"
+            logger.info(log_msg)
+            print(f"[CALENDAR_CLIENT] {log_msg}")
+
             return self._format_event(created_event)
 
         except HttpError as error:
@@ -203,6 +270,10 @@ class GoogleCalendarClient:
                 .execute()
             )
 
+            log_msg = f"Google Calendar API get event - calendarId={calendar_id}, eventId={event_id}"
+            logger.info(log_msg)
+            print(f"[CALENDAR_CLIENT] {log_msg}")
+
             # Update fields if provided
             if title:
                 event["summary"] = title
@@ -218,6 +289,10 @@ class GoogleCalendarClient:
                 .update(calendarId=calendar_id, eventId=event_id, body=event)
                 .execute()
             )
+
+            log_msg = f"Google Calendar API update event - calendarId={calendar_id}, eventId={event_id}, summary={event.get('summary')}"
+            logger.info(log_msg)
+            print(f"[CALENDAR_CLIENT] {log_msg}")
 
             return self._format_event(updated_event)
 
@@ -241,6 +316,11 @@ class GoogleCalendarClient:
             self.service.events().delete(
                 calendarId=calendar_id, eventId=event_id
             ).execute()
+
+            log_msg = f"Google Calendar API delete event - calendarId={calendar_id}, eventId={event_id}"
+            logger.info(log_msg)
+            print(f"[CALENDAR_CLIENT] {log_msg}")
+
             return {"message": f"Event {event_id} deleted successfully"}
 
         except HttpError as error:

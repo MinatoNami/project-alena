@@ -27,6 +27,8 @@ service = build("calendar", "v3", credentials=creds)
 events = (
     service.events()
     .list(
+        timeMin="2026-01-06T00:00:00Z",
+        timeMax="2026-03-06T23:59:59Z",
         calendarId="primary",
         maxResults=5,
         singleEvents=True,
@@ -36,29 +38,29 @@ events = (
 )
 
 for event in events.get("items", []):
-    print(event["summary"], event["start"])
+    print(event)
 
-# Create a test event called "Potato Test" on the current day at 6pm
-from datetime import datetime, time
+# # Create a test event called "Potato Test" on the current day at 6pm
+# from datetime import datetime, time
 
-today = datetime.now().date()
-event_time = datetime.combine(today, time(18, 0))  # 6pm
+# today = datetime.now().date()
+# event_time = datetime.combine(today, time(18, 0))  # 6pm
 
-# Get timezone settings from environment
-CALENDAR_TIMEZONE = os.getenv("CALENDAR_TIMEZONE", "Asia/Singapore")
-CALENDAR_TIMEZONE_OFFSET = os.getenv("CALENDAR_TIMEZONE_OFFSET", "+08:00")
+# # Get timezone settings from environment
+# CALENDAR_TIMEZONE = os.getenv("CALENDAR_TIMEZONE", "Asia/Singapore")
+# CALENDAR_TIMEZONE_OFFSET = os.getenv("CALENDAR_TIMEZONE_OFFSET", "+08:00")
 
-test_event = {
-    "summary": "Potato Test",
-    "start": {
-        "dateTime": f"{event_time.isoformat()}{CALENDAR_TIMEZONE_OFFSET}",
-        "timeZone": CALENDAR_TIMEZONE,
-    },
-    "end": {
-        "dateTime": f"{event_time.replace(hour=19).isoformat()}{CALENDAR_TIMEZONE_OFFSET}",
-        "timeZone": CALENDAR_TIMEZONE,
-    },
-}
+# test_event = {
+#     "summary": "Potato Test",
+#     "start": {
+#         "dateTime": f"{event_time.isoformat()}{CALENDAR_TIMEZONE_OFFSET}",
+#         "timeZone": CALENDAR_TIMEZONE,
+#     },
+#     "end": {
+#         "dateTime": f"{event_time.replace(hour=19).isoformat()}{CALENDAR_TIMEZONE_OFFSET}",
+#         "timeZone": CALENDAR_TIMEZONE,
+#     },
+# }
 
-created_event = service.events().insert(calendarId="primary", body=test_event).execute()
-print(f"Created event: {created_event['summary']} at {created_event['start']}")
+# created_event = service.events().insert(calendarId="primary", body=test_event).execute()
+# print(f"Created event: {created_event['summary']} at {created_event['start']}")

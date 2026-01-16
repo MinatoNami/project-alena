@@ -311,8 +311,15 @@ async def run_agent(
 
         memory.add_tool_call(tool, arguments)
         result = await tool_executor(_get_server_for_tool(tool), tool, arguments)
-        normalized = normalize_codex_output(result.content)
-        memory.add_tool_result(tool, normalized["message"])
+
+        # Don't normalize non-Codex tools - use their output directly
+        if tool.startswith("codex_"):
+            normalized = normalize_codex_output(result.content)
+            tool_result = normalized["message"]
+        else:
+            tool_result = result.content
+
+        memory.add_tool_result(tool, tool_result)
 
         tool_steps += 1
         if tool_steps >= max_tool_steps:
