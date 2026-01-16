@@ -108,8 +108,10 @@ bash scripts/start_alena_with_mcp.sh
 
 Environment variables:
 
-- `OLLAMA_HOST` (default `http://10.8.0.1:11434`)
+- `OLLAMA_HOST` (default `http://localhost:11434`)
 - `OLLAMA_MODEL` (default `gpt-oss:20b`)
+
+All services read from the repo root `.env` (see `.env.example`).
 
 ---
 
@@ -119,17 +121,25 @@ From `modules/voice-assistant/backend` (PowerShell, with SSL):
 
 ```powershell
 python -m uvicorn app.main:app `
-  --host 0.0.0.0 `
+  --host localhost `
   --port 8000 `
-  --ssl-certfile certs/10.8.0.1+1.pem `
-  --ssl-keyfile certs/10.8.0.1+1-key.pem
+  --ssl-certfile certs/server.pem `
+  --ssl-keyfile certs/server-key.pem
 ```
 
 ---
 
 ## Run (Voice Assistant frontend)
 
--
+From `modules/voice-assistant/frontend`:
+
+```bash
+npm install
+npm run dev
+```
+
+- Styling: Tailwind v4 via `@tailwindcss/vite`, global entry at `app/assets/css/main.css`.
+- UI kit: `@nuxt/ui` is enabled in `nuxt.config.ts`.
 
 ## Run (Telegram Bot → Controller)
 
@@ -139,7 +149,7 @@ From repo root:
 bash scripts/start_telegram_with_controller_mcp.sh
 ```
 
-Configure in `modules/telegram/.env`:
+Configure in the repo root `.env`:
 
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_TARGET_CHAT_ID`
@@ -151,16 +161,8 @@ Optional:
 - `TELEGRAM_SOURCE_CHAT_IDS` (restrict listening)
 - `TELEGRAM_ECHO_IN_TARGET` (allow echo in target)
 - `TELEGRAM_REPLY_IN_SOURCE` (reply in source chat)
-
-From `modules/voice-assistant/frontend`:
-
-```bash
-npm install
-npm run dev
-```
-
-- Styling: Tailwind v4 via `@tailwindcss/vite`, global entry at `app/assets/css/main.css`.
-- UI kit: `@nuxt/ui` is enabled in `nuxt.config.ts`.
+- `TELEGRAM_STT_WS_URL` (remote Whisper WebSocket)
+- `TELEGRAM_STT_SSL_VERIFY` (set `false` for self-signed certs)
 
 ---
 

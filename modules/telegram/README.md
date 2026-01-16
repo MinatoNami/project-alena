@@ -5,11 +5,10 @@ This module runs a Telegram bot that forwards incoming messages to a target grou
 ## Setup
 
 1. Install dependencies:
-   - Telegram bot runtime: `pip install -r modules/telegram/requirements.txt`
-   - Whisper dependencies: `pip install -r modules/voice-assistant/backend/requirements.txt`
+   - Root dependencies: `pip install -r requirements.txt`
 2. Create a Telegram bot using BotFather and get a token.
 3. Add the bot to your group and disable privacy mode if you want it to receive all messages.
-4. Set environment variables:
+4. Set environment variables in the repo root `.env` (see `.env.example`):
 
 ```
 TELEGRAM_BOT_TOKEN=your_token_here
@@ -24,14 +23,22 @@ TELEGRAM_TARGET_CHAT_ID=-1001234567890
 # TELEGRAM_CONTROLLER_ENABLED=true
 # TELEGRAM_CONTROLLER_URL=http://localhost:9000
 # TELEGRAM_CONTROLLER_TIMEOUT=120
+# TELEGRAM_CONTROLLER_MAX_CONCURRENCY=2
+# TELEGRAM_STT_WS_URL=ws://whisper-host:8000/ws
+# TELEGRAM_STT_TIMEOUT=60
+# TELEGRAM_STT_SSL_VERIFY=true
 ```
 
 5. Run the bot:
 
 ```
-python -m modules.telegram.bot
+bash scripts/start_telegram_with_controller_mcp.sh
 ```
 
 ## Voice transcription
 
 Telegram voice messages are OGG/Opus. The bot converts them to WAV before Whisper. Conversion uses `librosa` when available or falls back to `ffmpeg`. If `ffmpeg` is not installed, install it and ensure it is on your PATH.
+
+For a remote Whisper server over WebSocket, set `TELEGRAM_STT_WS_URL` (e.g. `ws://whisper-host:8000/ws`). The bot will send WAV bytes using the same start/end protocol used by the voice assistant WebSocket. If you use `wss://` with a self-signed cert, set `TELEGRAM_STT_SSL_VERIFY=false`.
+
+If you only use remote STT, you do not need local Whisper installed.

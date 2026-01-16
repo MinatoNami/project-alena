@@ -1,6 +1,16 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
+
+try:
+    from dotenv import load_dotenv
+except Exception:  # pragma: no cover
+    load_dotenv = None  # type: ignore
+
+
+_ROOT_ENV = Path(__file__).resolve().parents[2] / ".env"
+
 from dataclasses import dataclass
 from typing import Optional, Set
 
@@ -15,6 +25,10 @@ class TelegramBotConfig:
     controller_enabled: bool
     controller_url: str
     controller_timeout: float
+    controller_max_concurrency: int
+    stt_ws_url: Optional[str]
+    stt_timeout: float
+    stt_ssl_verify: bool
 
 
 def _parse_int_set(value: str) -> Set[int]:
@@ -22,6 +36,9 @@ def _parse_int_set(value: str) -> Set[int]:
 
 
 def load_config() -> TelegramBotConfig:
+    if load_dotenv is not None:
+        load_dotenv(_ROOT_ENV, override=False)
+
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:
         raise ValueError("TELEGRAM_BOT_TOKEN is required")
@@ -58,6 +75,19 @@ def load_config() -> TelegramBotConfig:
         "TELEGRAM_CONTROLLER_URL", "http://localhost:9000"
     ).strip()
     controller_timeout = float(os.getenv("TELEGRAM_CONTROLLER_TIMEOUT", "120"))
+    controller_max_concurrency = int(
+        os.getenv("TELEGRAM_CONTROLLER_MAX_CONCURRENCY", "2")
+    )
+    if controller_max_concurrency < 1:
+        controller_max_concurrency = 1
+
+    stt_ws_url = os.getenv("TELEGRAM_STT_WS_URL", "").strip() or None
+    stt_timeout = float(os.getenv("TELEGRAM_STT_TIMEOUT", "60"))
+    stt_ssl_verify = os.getenv("TELEGRAM_STT_SSL_VERIFY", "true").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
 
     return TelegramBotConfig(
         token=token,
@@ -68,4 +98,8 @@ def load_config() -> TelegramBotConfig:
         controller_enabled=controller_enabled,
         controller_url=controller_url,
         controller_timeout=controller_timeout,
+        controller_max_concurrency=controller_max_concurrency,
+        stt_ws_url=stt_ws_url,
+        stt_timeout=stt_timeout,
+        stt_ssl_verify=stt_ssl_verify,
     )

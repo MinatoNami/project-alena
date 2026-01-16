@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 import httpx
+import websockets
 from telegram import Update
 from telegram.constants import ChatType
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
@@ -126,6 +127,9 @@ class TelegramWhisperBot:
     def __init__(self, config: TelegramBotConfig):
         self.config = config
         self._stt = None
+        self._controller_semaphore = asyncio.Semaphore(
+            self.config.controller_max_concurrency
+        )
 
         if WhisperSTT is not None and Settings is not None:
             settings = Settings()
@@ -202,16 +206,70 @@ class TelegramWhisperBot:
             payload["session_id"] = session_id
 
         try:
-            timeout = httpx.Timeout(self.config.controller_timeout)
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await client.post(url, json=payload)
-                resp.raise_for_status()
-                data = resp.json()
-                if isinstance(data, dict):
-                    return str(data.get("response") or "")
+            async with self._controller_semaphore:
+                timeout = httpx.Timeout(self.config.controller_timeout)
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    resp = await client.post(url, json=payload)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    if isinstance(data, dict):
+                        return str(data.get("response") or "")
         except Exception as exc:
             LOGGER.exception("Controller request failed")
             return f"Controller error: {exc}"
+
+        return ""
+
+    async def _transcribe_via_ws(self, audio_wav_bytes: bytes) -> str:
+        if not self.config.stt_ws_url:
+            return ""
+
+        try:
+            ssl_context = None
+            if self.config.stt_ws_url.startswith("wss://"):
+                import ssl
+
+                if self.config.stt_ssl_verify:
+                    ssl_context = ssl.create_default_context()
+                else:
+                    ssl_context = ssl._create_unverified_context()
+
+            async with websockets.connect(
+                self.config.stt_ws_url,
+                max_size=25_000_000,
+                open_timeout=self.config.stt_timeout,
+                ssl=ssl_context,
+            ) as ws:
+                try:
+                    message = await asyncio.wait_for(ws.recv(), timeout=5)
+                    if message:
+                        LOGGER.debug("STT WS ready: %s", message)
+                except Exception:
+                    pass
+
+                await ws.send('{"action":"start"}')
+                await ws.send(audio_wav_bytes)
+                await ws.send('{"action":"end"}')
+
+                while True:
+                    msg = await asyncio.wait_for(
+                        ws.recv(), timeout=self.config.stt_timeout
+                    )
+                    if not msg:
+                        continue
+                    try:
+                        import json
+
+                        data = msg if isinstance(msg, str) else msg.decode("utf-8")
+                        payload = json.loads(data)
+                    except Exception:
+                        continue
+
+                    if isinstance(payload, dict) and payload.get("type") == "stt":
+                        return str(payload.get("text") or "")
+        except Exception as exc:
+            LOGGER.exception("Remote STT websocket failed")
+            return f""
 
         return ""
 
@@ -279,19 +337,24 @@ class TelegramWhisperBot:
         )
 
         if self._stt is None:
-            await context.bot.send_message(
-                chat_id=self.config.target_chat_id,
-                text="Whisper backend not configured; cannot transcribe voice.",
-            )
-            return
+            if not self.config.stt_ws_url:
+                await context.bot.send_message(
+                    chat_id=self.config.target_chat_id,
+                    text="Whisper backend not configured; cannot transcribe voice.",
+                )
+                return
 
         voice_file = await context.bot.get_file(message.voice.file_id)
         ogg_bytes = await voice_file.download_as_bytearray()
 
         try:
             wav_bytes = ogg_opus_to_wav_bytes(bytes(ogg_bytes))
-            result = await self._stt.transcribe_wav_bytes(wav_bytes)
-            text = (result.get("text") or "").strip()
+            text = ""
+            if self.config.stt_ws_url:
+                text = (await self._transcribe_via_ws(wav_bytes)).strip()
+            if not text and self._stt is not None:
+                result = await self._stt.transcribe_wav_bytes(wav_bytes)
+                text = (result.get("text") or "").strip()
         except Exception as exc:
             LOGGER.exception("Voice transcription failed")
             await context.bot.send_message(
