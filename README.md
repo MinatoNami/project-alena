@@ -120,9 +120,11 @@ Notes:
 
 - ✅ Local LLM inference
 - ✅ Whisper STT integration
-- 🚧 MCP server expansion
-- 🚧 Web voice interface MVP
-- 🚧 Adaptive learning layer
+- ✅ Web voice interface MVP (web app usable; supports voice memos via Telegram)
+- ✅ Telegram integration (text + voice memos → controller)
+- ✅ Codex MCP server integration (tool executor wired)
+- 🚧 MCP server expansion (more MCPs planned)
+- 🚧 Adaptive learning (currently stateless; KB + LLM-generated MCP servers coming next)
 
 ---
 
