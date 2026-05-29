@@ -134,6 +134,12 @@ cd modules/voice-assistant/backend
 docker compose up --build
 ```
 
+Or run it from the repo root with explicit compose file paths:
+
+```bash
+docker compose -f modules/voice-assistant/backend/docker-compose.yml up --build
+```
+
 Health check:
 
 ```bash
@@ -165,6 +171,15 @@ Then start with the GPU override:
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+```
+
+From the repo root, use:
+
+```bash
+docker compose \
+  -f modules/voice-assistant/backend/docker-compose.yml \
+  -f modules/voice-assistant/backend/docker-compose.gpu.yml \
+  up --build
 ```
 
 If Docker reports `failed to discover GPU vendor from CDI`, the host is not ready

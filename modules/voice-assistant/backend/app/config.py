@@ -7,7 +7,15 @@ from typing import List
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-ROOT_DIR = Path(__file__).resolve().parents[4]
+def _find_root_dir() -> Path:
+    here = Path(__file__).resolve()
+    return next(
+        (parent for parent in here.parents if (parent / ".env").exists()),
+        here.parents[1],
+    )
+
+
+ROOT_DIR = _find_root_dir()
 
 
 class Settings(BaseSettings):
