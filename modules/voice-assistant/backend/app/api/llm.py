@@ -6,21 +6,20 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.config import get_settings
-from modules.ollama import OllamaAsyncClient, OllamaConfig
+from app.services.llm.ollama import OllamaClient
 
 router = APIRouter()
 
 
-def _build_client() -> OllamaAsyncClient:
+def _build_client() -> OllamaClient:
     settings = get_settings()
     if not settings.ollama_enabled:
         raise HTTPException(status_code=503, detail="Ollama is disabled")
-    config = OllamaConfig(
+    return OllamaClient(
         base_url=settings.ollama_base_url,
         model=settings.ollama_model,
         timeout_s=settings.ollama_timeout,
     )
-    return OllamaAsyncClient(config)
 
 
 @router.post("/api/chat")

@@ -168,14 +168,40 @@ All services read from the repo root `.env` (see `.env.example`).
 
 ## Run (Voice Assistant backend)
 
-From `modules/voice-assistant/backend` (PowerShell, with SSL):
+For the standalone voice-device setup, run both the backend and frontend on the
+device that owns the microphone/Whisper service:
+
+```bash
+cp .env.example .env
+```
+
+Set the voice device IP and Ollama URL in `.env`:
+
+```env
+HOST=0.0.0.0
+PORT=8000
+VOICE_ASSISTANT_PUBLIC_HOST=192.168.1.25
+OLLAMA_BASE_URL=http://192.168.1.50:11434
+LLM_ROUTE=ollama
+```
+
+Then start the stack:
+
+```bash
+./modules/voice-assistant/start_standalone.sh
+```
+
+Use `FRONTEND_MODE=preview ./modules/voice-assistant/start_standalone.sh` to
+host the production-built Nuxt frontend instead of the dev server.
+
+Open `http://192.168.1.25:3000` from another device on the network.
+
+Backend only, from `modules/voice-assistant/backend`:
 
 ```powershell
 python -m uvicorn app.main:app `
-  --host localhost `
-  --port 8000 `
-  --ssl-certfile certs/server.pem `
-  --ssl-keyfile certs/server-key.pem
+  --host 0.0.0.0 `
+  --port 8000
 ```
 
 Key environment variables:

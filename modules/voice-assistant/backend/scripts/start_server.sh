@@ -15,9 +15,10 @@ fi
 
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 VENV_DIR="${VENV_DIR:-.venv}"
-HOST="${HOST:-localhost}"
-PORT="${PORT:-8001}"
+HOST="${HOST:-0.0.0.0}"
+PORT="${PORT:-8000}"
 RELOAD="${RELOAD:-1}"
+USE_SSL="${USE_SSL:-0}"
 
 if [[ ! -d "$VENV_DIR" ]]; then
   "$PYTHON_BIN" -m venv "$VENV_DIR"
@@ -32,7 +33,10 @@ pip install -r requirements.txt
 CERT_FILE="${CERT_FILE:-certs/server.pem}"
 KEY_FILE="${KEY_FILE:-certs/server-key.pem}"
 
-UVICORN_ARGS=("app.main:app" "--host" "$HOST" "--port" "$PORT" "--ssl-certfile" "$CERT_FILE" "--ssl-keyfile" "$KEY_FILE")
+UVICORN_ARGS=("app.main:app" "--host" "$HOST" "--port" "$PORT")
+if [[ "$USE_SSL" == "1" ]]; then
+  UVICORN_ARGS+=("--ssl-certfile" "$CERT_FILE" "--ssl-keyfile" "$KEY_FILE")
+fi
 if [[ "$RELOAD" == "1" ]]; then
   UVICORN_ARGS+=("--reload")
 fi

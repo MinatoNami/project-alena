@@ -39,6 +39,27 @@
             {{ error }}
           </div>
 
+          <div class="grid gap-4 md:grid-cols-2">
+            <div class="rounded-lg border border-gray-200 p-4">
+              <div class="text-sm font-semibold mb-2">Transcript</div>
+              <div class="text-sm whitespace-pre-wrap break-words">
+                {{ voiceTranscript || "No transcript yet." }}
+              </div>
+            </div>
+
+            <div class="rounded-lg border border-gray-200 p-4">
+              <div class="text-sm font-semibold mb-2">
+                Response
+                <span v-if="voiceLoading" class="text-gray-500 font-normal">
+                  streaming...
+                </span>
+              </div>
+              <div class="text-sm whitespace-pre-wrap break-words">
+                {{ voiceResponse || "No response yet." }}
+              </div>
+            </div>
+          </div>
+
           <div v-if="lastMessage" class="rounded-lg border border-gray-200 p-4">
             <div class="text-sm font-semibold mb-2">Last Message</div>
             <pre
@@ -153,6 +174,9 @@ const messages = ref<ChatMessage[]>([]);
 const draftMessage = ref("");
 const chatError = ref("");
 const chatLoading = ref(false);
+const voiceTranscript = ref("");
+const voiceResponse = ref("");
+const voiceLoading = ref(false);
 const config = useRuntimeConfig();
 const llmApiUrl =
   (config.public as any).llmApiUrl || (config.public as any).ollamaUrl;
@@ -207,6 +231,43 @@ watch(
   },
   { deep: true }
 );
+
+watch(lastMessage, (message) => {
+  if (!message || typeof message !== "object") return;
+
+  if (message.type === "stt") {
+    voiceTranscript.value =
+      typeof message.text === "string" ? message.text : "";
+    voiceResponse.value = "";
+    voiceLoading.value = false;
+    return;
+  }
+
+  if (message.type !== "llm") return;
+
+  if (message.event === "start") {
+    voiceResponse.value = "";
+    voiceLoading.value = true;
+    return;
+  }
+
+  if (typeof message.delta === "string") {
+    voiceResponse.value += message.delta;
+    return;
+  }
+
+  if (message.event === "end") {
+    if (typeof message.text === "string") {
+      voiceResponse.value = message.text;
+    }
+    voiceLoading.value = false;
+    return;
+  }
+
+  if (message.event === "error" || message.event === "skipped") {
+    voiceLoading.value = false;
+  }
+});
 
 async function sendMessage() {
   if (!draftMessage.value.trim() || chatLoading.value) return;

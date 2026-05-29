@@ -134,11 +134,10 @@ class WhisperSTT:
             "Loaded %s model via %s", self.settings.whisper_model, self._backend
         )
 
-    async def transcribe_wav_bytes(self, audio_wav_bytes: bytes) -> Dict[str, Any]:
+    async def transcribe_audio_bytes(self, audio_bytes: bytes) -> Dict[str, Any]:
         self._ensure_model()
 
-        # Load audio directly from WAV bytes instead of using file path
-        audio_data = load_audio_from_wav_bytes(audio_wav_bytes)
+        audio_data = load_audio_from_wav_bytes(audio_bytes)
 
         if self._backend == "faster-whisper":
             segments, info = self._model.transcribe(audio_data)
@@ -156,7 +155,7 @@ class WhisperSTT:
                 "Transcribed audio via %s (lang: %s, audio_size: %d bytes): %s",
                 self._backend,
                 result["language"],
-                len(audio_wav_bytes),
+                len(audio_bytes),
                 text,
             )
             return result
@@ -168,7 +167,7 @@ class WhisperSTT:
             "Transcribed audio via %s (lang: %s, audio_size: %d bytes): %s",
             self._backend,
             result.get("language"),
-            len(audio_wav_bytes),
+            len(audio_bytes),
             text,
         )
         return {
@@ -176,3 +175,6 @@ class WhisperSTT:
             "language": result.get("language"),
             "text": text,
         }
+
+    async def transcribe_wav_bytes(self, audio_wav_bytes: bytes) -> Dict[str, Any]:
+        return await self.transcribe_audio_bytes(audio_wav_bytes)

@@ -27,7 +27,6 @@ def _safe_json_loads(text: str) -> Optional[Dict[str, Any]]:
 async def websocket_endpoint(ws: WebSocket) -> None:
     settings = get_settings()
     pipeline = Pipeline(settings=settings)
-    route = (settings.llm_route or "ollama").lower()
 
     await ws.accept()
     audio_buffer = bytearray()
@@ -111,9 +110,17 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                     )
 
                     try:
-                        result = await pipeline.run(audio_wav_bytes=bytes(audio_buffer))
+                        result = await pipeline.transcribe(
+                            audio_bytes=bytes(audio_buffer)
+                        )
+                        transcript = result.get("transcript", "")
                         await send(
-                            {"type": "stt", "text": result.get("transcript", "")}
+                            {
+                                "type": "stt",
+                                "text": transcript,
+                                "backend": result.get("stt_backend"),
+                                "language": result.get("language"),
+                            }
                         )
                     except Exception as stt_exc:
                         logger.error("STT processing failed: %s", stt_exc)
@@ -121,26 +128,20 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                         audio_buffer.clear()
                         continue
 
-                    if (
-                        route == "ollama"
-                        and result.get("llm_enabled")
-                        and pipeline.ollama is not None
-                    ):
-                        prompt = result.get("prompt", "")
+                    prompt = result.get("prompt", "")
+                    if prompt and pipeline.can_generate():
                         await send(
                             {
                                 "type": "llm",
                                 "event": "start",
-                                "model": pipeline.ollama.model,
+                                "model": pipeline.model_name(),
                                 "prompt": prompt,
                             }
                         )
 
                         try:
                             full = ""
-                            async for delta in pipeline.ollama.stream_generate(
-                                prompt=prompt
-                            ):
+                            async for delta in pipeline.stream_response(prompt=prompt):
                                 full += delta
                                 await send({"type": "llm", "delta": delta})
 
@@ -154,33 +155,10 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                                     "message": str(llm_exc),
                                 }
                             )
-                    elif route == "alena" and pipeline.alena is not None:
-                        prompt = result.get("prompt", "")
-                        await send(
-                            {
-                                "type": "llm",
-                                "event": "start",
-                                "model": "alena-controller",
-                                "prompt": prompt,
-                            }
-                        )
-                        try:
-                            text = await pipeline.alena.generate(prompt=prompt)
-                            if text:
-                                await send({"type": "llm", "delta": text})
-                            await send({"type": "llm", "event": "end", "text": text})
-                        except Exception as llm_exc:
-                            logger.error("ALENA generation failed: %s", llm_exc)
-                            await send(
-                                {
-                                    "type": "llm",
-                                    "event": "error",
-                                    "message": str(llm_exc),
-                                }
-                            )
                     else:
                         await send({"type": "llm", "event": "skipped"})
 
+                    audio_buffer.clear()
                     continue
 
                 await send({"type": "error", "message": f"unknown action: {action}"})
