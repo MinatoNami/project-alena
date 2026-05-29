@@ -15,6 +15,9 @@ Matches the requested layout under `backend/app/`.
 From `modules/voice-assistant/backend`:
 
 ```bash
+sudo apt update
+sudo apt install -y python3 python3-venv python3-pip ffmpeg
+
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -45,6 +48,9 @@ Health check:
 From the repo root on the device that will host the voice assistant:
 
 ```bash
+sudo apt update
+sudo apt install -y python3 python3-venv python3-pip ffmpeg nodejs npm
+
 cp .env.example .env
 ```
 
@@ -97,50 +103,79 @@ ws://192.168.1.25:8000/ws
 If browser microphone access is blocked over plain HTTP, use localhost for
 testing or run the backend/frontend behind HTTPS/WSS.
 
-## SSL (local development)
+## SSL / HTTPS on Ubuntu
 
 This backend can be run over HTTPS/WSS by providing a certificate and key.
+This is optional for the standalone setup, but it is useful when browsers block
+microphone access over plain HTTP or when the frontend is served over HTTPS.
 
-### Generate local `.pem` certs (mkcert)
+### Option 1: Plain HTTP for LAN Testing
 
-The filenames in the run command below match mkcert's output naming.
+Skip certs and run the backend with:
 
-1. Install mkcert (once):
+```bash
+cd modules/voice-assistant/backend
+HOST=0.0.0.0 PORT=8000 USE_SSL=0 ./scripts/start_server.sh
+```
 
-- Windows (Chocolatey):
+The frontend should use:
 
-```powershell
-choco install mkcert
+```env
+NUXT_PUBLIC_WS_AUDIO_URL=ws://192.168.1.25:8000/ws
+```
+
+### Option 2: Generate Local Certs with mkcert
+
+Install mkcert on Ubuntu:
+
+```bash
+sudo apt update
+sudo apt install -y libnss3-tools wget
+wget -O mkcert https://github.com/FiloSottile/mkcert/releases/latest/download/mkcert-v1.4.4-linux-amd64
+chmod +x mkcert
+sudo mv mkcert /usr/local/bin/
 mkcert -install
 ```
 
-2. Generate the cert + key into `certs/`:
+Generate certs for localhost and your voice device LAN IP:
 
-```powershell
+```bash
 cd modules/voice-assistant/backend
-mkdir certs -Force
-mkcert -cert-file certs/server.pem -key-file certs/server-key.pem localhost
+mkdir -p certs
+mkcert -cert-file certs/server.pem -key-file certs/server-key.pem localhost 127.0.0.1 192.168.1.25
 ```
 
-Notes:
+Replace `192.168.1.25` with the voice device IP.
+
+Run with SSL:
+
+```bash
+HOST=0.0.0.0 PORT=8000 USE_SSL=1 ./scripts/start_server.sh
+```
+
+The frontend should use:
+
+```env
+VOICE_ASSISTANT_SCHEME=https
+NUXT_PUBLIC_WS_AUDIO_URL=wss://192.168.1.25:8000/ws
+```
+
+Trust note: mkcert installs a local CA on the machine where you run
+`mkcert -install`. If you open the frontend from another laptop/phone, that
+client may still not trust the cert until you install the mkcert root CA there
+too. For a permanent LAN setup, use a trusted certificate through a reverse proxy
+or serve the app from localhost on the device doing the recording.
+
+### Certificate Files
 
 - `*.pem` is ignored via the repo root `.gitignore`.
+- Expected local files:
+  - `modules/voice-assistant/backend/certs/server.pem`
+  - `modules/voice-assistant/backend/certs/server-key.pem`
 - If you previously committed any `.pem` files, untrack them with:
 
-```powershell
+```bash
 git rm --cached -r -- **/*.pem
-```
-
-### Run with SSL (PowerShell)
-
-From `modules/voice-assistant/backend`:
-
-```powershell
-python -m uvicorn app.main:app `
-  --host localhost `
-  --port 8000 `
-  --ssl-certfile certs/server.pem `
-  --ssl-keyfile certs/server-key.pem
 ```
 
 ## WebSocket protocol
