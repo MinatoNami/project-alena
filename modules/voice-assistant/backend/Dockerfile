@@ -16,11 +16,10 @@ RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
-COPY certs ./certs
 
-ENV HOST=localhost \
-    PORT=8001
+ENV HOST=0.0.0.0 \
+    PORT=8000
 
-EXPOSE 8001
+EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "localhost", "--port", "8001", "--ssl-certfile", "certs/server.pem", "--ssl-keyfile", "certs/server-key.pem"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

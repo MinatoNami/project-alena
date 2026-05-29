@@ -103,6 +103,58 @@ ws://192.168.1.25:8000/ws
 If browser microphone access is blocked over plain HTTP, use localhost for
 testing or run the backend/frontend behind HTTPS/WSS.
 
+## Run Backend with Docker Compose on Ubuntu
+
+The compose file reads configuration from the repo root `.env`, not from
+`modules/voice-assistant/backend/.env`.
+
+From the repo root:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` for the voice device:
+
+```env
+HOST=0.0.0.0
+PORT=8000
+WHISPER_MODEL=small
+WHISPER_DEVICE=cpu
+WHISPER_COMPUTE_TYPE=int8
+OLLAMA_BASE_URL=http://192.168.1.50:11434
+OLLAMA_MODEL=gpt-oss:20b
+LLM_ROUTE=ollama
+```
+
+Start the backend container:
+
+```bash
+cd modules/voice-assistant/backend
+docker compose up --build
+```
+
+Health check:
+
+```bash
+curl http://localhost:8000/health
+```
+
+The backend WebSocket will be:
+
+```text
+ws://<voice-device-ip>:8000/ws
+```
+
+If you want GPU acceleration in Docker, install the NVIDIA Container Toolkit on
+Ubuntu and keep `gpus: all` in `docker-compose.yml`. For CPU-only Docker, remove
+or comment out `gpus: all` and use:
+
+```env
+WHISPER_DEVICE=cpu
+WHISPER_COMPUTE_TYPE=int8
+```
+
 ## SSL / HTTPS on Ubuntu
 
 This backend can be run over HTTPS/WSS by providing a certificate and key.
