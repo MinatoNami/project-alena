@@ -146,14 +146,87 @@ The backend WebSocket will be:
 ws://<voice-device-ip>:8000/ws
 ```
 
-If you want GPU acceleration in Docker, install the NVIDIA Container Toolkit on
-Ubuntu and keep `gpus: all` in `docker-compose.yml`. For CPU-only Docker, remove
-or comment out `gpus: all` and use:
+The default compose file is CPU-safe. Use:
 
 ```env
 WHISPER_DEVICE=cpu
 WHISPER_COMPUTE_TYPE=int8
 ```
+
+For GPU acceleration in Docker, install the NVIDIA Container Toolkit on Ubuntu,
+set CUDA-friendly Whisper values:
+
+```env
+WHISPER_DEVICE=cuda
+WHISPER_COMPUTE_TYPE=float16
+```
+
+Then start with the GPU override:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+```
+
+If Docker reports `failed to discover GPU vendor from CDI`, the host is not ready
+for Docker GPU access. Use the default CPU command above or fix the NVIDIA
+Container Toolkit installation.
+
+### Ubuntu NVIDIA Docker Setup
+
+First confirm the NVIDIA driver works on the host:
+
+```bash
+nvidia-smi
+```
+
+If that command fails, install or repair the Ubuntu NVIDIA driver first. On a
+Razer Blade 2021 with RTX 3060, use Ubuntu's recommended proprietary driver:
+
+```bash
+sudo ubuntu-drivers devices
+sudo ubuntu-drivers autoinstall
+sudo reboot
+```
+
+After reboot, confirm `nvidia-smi` works.
+
+Install NVIDIA Container Toolkit:
+
+```bash
+curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
+  | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+
+curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
+  | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
+  | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+
+sudo apt-get update
+sudo apt-get install -y nvidia-container-toolkit
+```
+
+Configure Docker to use the NVIDIA runtime and restart Docker:
+
+```bash
+sudo nvidia-ctk runtime configure --runtime=docker
+sudo systemctl restart docker
+```
+
+Test GPU access inside Docker:
+
+```bash
+docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi
+```
+
+If the test succeeds, start the voice backend with GPU support:
+
+```bash
+cd modules/voice-assistant/backend
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+```
+
+These commands follow NVIDIA's Container Toolkit installation flow for Docker on
+Ubuntu. See NVIDIA's official docs for the latest package details:
+https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html
 
 ## SSL / HTTPS on Ubuntu
 

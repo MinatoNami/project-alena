@@ -9,14 +9,11 @@ services:
     env_file:
       - ../../../.env
     environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
       - HOST=0.0.0.0
       - PORT=8000
     volumes:
       - ./app:/app/app:ro
       - ./whisper-cache:/root/.cache
-    gpus: all
 
   # frontend:
   #   build: ../frontend
