@@ -199,3 +199,116 @@ def test_a_todo_that_only_moved_is_not_reported_as_churn():
 
     assert delta["added"] == []
     assert delta["resolved"] == []
+
+
+# -- manifests found in real repositories ----------------------------------
+
+
+def test_requirements_dev_is_a_declaration_too(tmp_path):
+    """luma-index keeps pytest and ruff in requirements-dev.txt."""
+    (tmp_path / "requirements-dev.txt").write_text(
+        "-r requirements.txt\npytest>=8,<9\nruff>=0.7\n"
+    )
+    names = {d.name for d in extract_dependencies(tmp_path, ["requirements-dev.txt"])}
+
+    assert names == {"pytest", "ruff"}
+
+
+def test_an_include_line_is_not_a_dependency(tmp_path):
+    (tmp_path / "requirements-dev.txt").write_text("-r requirements.txt\n")
+    assert extract_dependencies(tmp_path, ["requirements-dev.txt"]) == []
+
+
+def test_pyproject_optional_dependencies_are_included(tmp_path):
+    """athena/core declares its test and lint tools in a dev extra."""
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "x"\ndependencies = ["fastapi>=0.115"]\n'
+        '[project.optional-dependencies]\ndev = ["pytest>=8.3", "mypy>=1.13"]\n'
+    )
+    names = {d.name for d in extract_dependencies(tmp_path, ["pyproject.toml"])}
+
+    assert names == {"fastapi", "pytest", "mypy"}
+
+
+def test_poetry_group_dependencies_are_included(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.poetry.dependencies]\npython = "^3.12"\nhttpx = "^0.27"\n'
+        '[tool.poetry.group.dev.dependencies]\npytest = "^8"\n'
+    )
+    names = {d.name for d in extract_dependencies(tmp_path, ["pyproject.toml"])}
+
+    assert names == {"httpx", "pytest"}
+
+
+def test_go_mod_direct_requirements_are_parsed(tmp_path):
+    (tmp_path / "go.mod").write_text(
+        "module github.com/example/node\n\n"
+        "go 1.23\n\n"
+        "require (\n"
+        "\tgithub.com/spf13/cobra v1.8.1\n"
+        "\tgolang.org/x/sync v0.10.0 // indirect\n"
+        ")\n\n"
+        "require github.com/stretchr/testify v1.9.0\n"
+    )
+    found = extract_dependencies(tmp_path, ["go.mod"])
+
+    assert {d.name for d in found} == {
+        "github.com/spf13/cobra",
+        "github.com/stretchr/testify",
+    }
+    assert all(d.ecosystem == "go" for d in found)
+
+
+def test_indirect_go_requirements_are_skipped(tmp_path):
+    """They are resolved transitively; listing them buries the real choices."""
+    (tmp_path / "go.mod").write_text(
+        "module x\nrequire (\n\tgolang.org/x/sync v0.10.0 // indirect\n)\n"
+    )
+    assert extract_dependencies(tmp_path, ["go.mod"]) == []
+
+
+def test_a_go_mod_with_no_requirements_yields_nothing(tmp_path):
+    """athena/node is exactly this today."""
+    (tmp_path / "go.mod").write_text("module github.com/example/node\n\ngo 1.23\n")
+    assert extract_dependencies(tmp_path, ["go.mod"]) == []
+
+
+def test_a_non_ascii_filename_survives_git(tmp_path):
+    """Athena tracks "Athena — Product Requirements Document.md".
+
+    Without core.quotePath=false git returns that as an octal-escaped, quoted
+    string, and every later path join against it fails.
+    """
+    workspace = tmp_path / "unicode"
+    workspace.mkdir()
+    git(workspace, "init", "-q", "-b", "main")
+    git(workspace, "config", "user.email", "t@example.com")
+    git(workspace, "config", "user.name", "T")
+    (workspace / "Spec — Product Requirements.md").write_text("# TODO: finish\n")
+    git(workspace, "add", "-A")
+    git(workspace, "commit", "-q", "-m", "Add spec")
+
+    state = GitRepository(workspace).state()
+
+    assert state.tracked_files == ["Spec — Product Requirements.md"]
+    assert (workspace / state.tracked_files[0]).exists()
+
+
+def test_a_non_ascii_path_survives_grep(tmp_path):
+    workspace = tmp_path / "unicode"
+    workspace.mkdir()
+    git(workspace, "init", "-q", "-b", "main")
+    git(workspace, "config", "user.email", "t@example.com")
+    git(workspace, "config", "user.name", "T")
+    (workspace / "notes — draft.md").write_text("# TODO: finish this\n")
+    git(workspace, "add", "-A")
+    git(workspace, "commit", "-q", "-m", "Add notes")
+
+    todos = parse_grep(GitRepository(workspace).grep(MARKERS))
+
+    assert todos[0].path == "notes — draft.md"
+
+
+def test_a_placeholder_that_merely_contains_a_marker_is_not_a_todo():
+    """Athena's PRD is full of CVE-2026-XXXXX, which is not a TODO."""
+    assert parse_grep(["docs/prd.md:81:> `CVE-2026-XXXXX detected`"]) == []

@@ -59,7 +59,10 @@ class GitRepository:
     def run(self, *args: str, check: bool = True) -> str:
         try:
             process = subprocess.run(
-                ["git", "-C", str(self.workspace), *args],
+                # quotePath=false or git escapes any non-ASCII path -- a file
+                # called "Athena — PRD.md" comes back as an octal-escaped,
+                # double-quoted string that no later path join can open.
+                ["git", "-C", str(self.workspace), "-c", "core.quotePath=false", *args],
                 capture_output=True,
                 text=True,
                 timeout=self.timeout,
@@ -141,6 +144,12 @@ class GitRepository:
 
         Tracked-only is the point: it skips node_modules, .venv and build
         output without needing to know what any of those are called.
+
+        The pattern is deliberately looser than what parse_grep accepts -- no
+        word boundaries here. git's regex flavour is not guaranteed to support
+        `\b`, and a pattern that silently matches nothing would drop every
+        TODO in the repository without saying so. Over-matching costs a few
+        discarded lines; under-matching loses the signal.
         """
         args = ["grep", "-n", "-I", "--no-color", "-E"]
         args.append("|".join(patterns))

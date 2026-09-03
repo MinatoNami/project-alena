@@ -90,23 +90,38 @@ def _parse_pyproject(text: str, manifest: str) -> List[Dependency]:
         return []
 
     found: List[Dependency] = []
-    for entry in data.get("project", {}).get("dependencies", []) or []:
+    project = data.get("project", {}) or {}
+
+    for entry in project.get("dependencies", []) or []:
         if isinstance(entry, str):
             found.extend(_parse_requirements(entry, manifest))
 
+    # Optional groups are declared dependencies too. Skipping them loses every
+    # test and lint tool, which is exactly what a "what does this project use"
+    # question wants to know about.
+    for entries in (project.get("optional-dependencies", {}) or {}).values():
+        for entry in entries or []:
+            if isinstance(entry, str):
+                found.extend(_parse_requirements(entry, manifest))
+
     # Poetry keeps its dependencies somewhere else entirely.
-    poetry = data.get("tool", {}).get("poetry", {}).get("dependencies", {}) or {}
-    for name, spec in poetry.items():
-        if name.lower() == "python":
-            continue
-        found.append(
-            Dependency(
-                name,
-                spec if isinstance(spec, str) else None,
-                manifest,
-                "python",
+    poetry = data.get("tool", {}).get("poetry", {}) or {}
+    groups = [poetry.get("dependencies", {}) or {}]
+    for group in (poetry.get("group", {}) or {}).values():
+        groups.append((group or {}).get("dependencies", {}) or {})
+
+    for table in groups:
+        for name, spec in table.items():
+            if name.lower() == "python":
+                continue
+            found.append(
+                Dependency(
+                    name,
+                    spec if isinstance(spec, str) else None,
+                    manifest,
+                    "python",
+                )
             )
-        )
     return found
 
 
@@ -124,11 +139,64 @@ def _parse_package_json(text: str, manifest: str) -> List[Dependency]:
     return found
 
 
+_GO_REQUIRE_LINE = re.compile(
+    r"^\s*(?P<name>[^\s()]+/[^\s()]+)\s+(?P<version>v[^\s]+)"
+)
+
+
+def _parse_go_mod(text: str, manifest: str) -> List[Dependency]:
+    """Direct requirements from a go.mod.
+
+    Indirect requirements are skipped: they are resolved transitively and
+    listing them would bury the handful of modules the project actually chose.
+    """
+    found: List[Dependency] = []
+    in_block = False
+    for raw in text.splitlines():
+        line = raw.split("//")[0].rstrip()
+        indirect = "// indirect" in raw
+
+        if in_block:
+            if line.strip() == ")":
+                in_block = False
+                continue
+        elif line.strip().startswith("require ("):
+            in_block = True
+            continue
+        elif line.strip().startswith("require "):
+            line = line.strip()[len("require ") :]
+        else:
+            continue
+
+        match = _GO_REQUIRE_LINE.match(line)
+        if match and not indirect:
+            found.append(
+                Dependency(match.group("name"), match.group("version"), manifest, "go")
+            )
+    return found
+
+
 _PARSERS = {
     "requirements.txt": _parse_requirements,
     "pyproject.toml": _parse_pyproject,
     "package.json": _parse_package_json,
+    "go.mod": _parse_go_mod,
 }
+
+
+def _parser_for(filename: str):
+    """Pick a parser for a manifest filename.
+
+    `requirements*.txt` is matched by shape rather than by exact name:
+    requirements-dev.txt and requirements-test.txt are as much a declaration of
+    what a project uses as requirements.txt is.
+    """
+    parser = _PARSERS.get(filename)
+    if parser is not None:
+        return parser
+    if filename.startswith("requirements") and filename.endswith(".txt"):
+        return _parse_requirements
+    return None
 
 
 def extract_dependencies(
@@ -141,7 +209,7 @@ def extract_dependencies(
     """
     found: List[Dependency] = []
     for relative in tracked_files:
-        parser = _PARSERS.get(Path(relative).name)
+        parser = _parser_for(Path(relative).name)
         if parser is None:
             continue
         path = workspace / relative

@@ -1,0 +1,134 @@
+# ALENA repository registry
+#
+# The authoritative answer to where a repository lives, which branch matters,
+# and what agents may do to it. Agents are never handed a path they chose
+# themselves -- they are handed a workspace resolved from here.
+#
+# Never put a token in this file. The loader rejects anything token-shaped,
+# because this file is checked in.
+#
+# Every repository below is read-only: research, analyze and plan are on,
+# every write capability is off. Nothing in Phase 1-3 writes to a repository
+# anyway; these turn on in Phase 4, one repository at a time, when there is a
+# human approval flow to write behind.
+#
+# Worth setting alongside this: ALENA_WORKSPACE_ROOT=/Users/lionelchong/git-repos
+# The declared workspaces become the Tool Gateway's allowed paths, so pinning
+# the root means a typo in this file cannot widen what a tool may touch.
+
+repositories:
+  - id: project-alena
+    name: Project ALENA
+    source:
+      provider: github
+      url: https://github.com/MinatoNami/project-alena.git
+      default_branch: main
+    workspace:
+      path: /Users/lionelchong/git-repos/project-alena
+    enabled: true
+    capabilities:
+      research: true
+      analyze: true
+      plan: true
+      modify: false
+      create_branch: false
+      create_pr: false
+      merge: false
+    agents:
+      research: [chatgpt-work]
+      engineering: [codex, claude-code]
+      implementation: [claude-code, codex]
+    schedule:
+      repository_scan: nightly
+      research: weekly
+      architecture_review: weekly
+    tags: [python, mcp, agents, voice, lm-studio, self-hosted]
+
+  - id: luma-index
+    name: LumaIndex
+    source:
+      provider: github
+      url: git@github.com:MinatoNami/luma-index.git
+      default_branch: main
+    workspace:
+      path: /Users/lionelchong/git-repos/luma-index
+    enabled: true
+    capabilities:
+      research: true
+      analyze: true
+      plan: true
+      modify: false
+      create_branch: false
+      create_pr: false
+      merge: false
+    agents:
+      research: [chatgpt-work]
+      engineering: [codex, claude-code]
+      implementation: [claude-code, codex]
+    schedule:
+      repository_scan: nightly
+      research: weekly
+      architecture_review: weekly
+    tags: [django, nuxt, postgres, pdf, documents, docker, self-hosted]
+
+  - id: athena
+    name: Project Athena
+    source:
+      provider: github
+      url: git@github.com:MinatoNami/project-athena.git
+      default_branch: main
+    workspace:
+      path: /Users/lionelchong/git-repos/project-athena
+    enabled: true
+    capabilities:
+      research: true
+      analyze: true
+      plan: true
+      modify: false
+      create_branch: false
+      create_pr: false
+      merge: false
+    agents:
+      research: [chatgpt-work]
+      # Security-sensitive: the spec routes these to Claude for independent
+      # review rather than letting one model propose and approve its own work.
+      engineering: [codex, claude-code]
+      implementation: [claude-code, codex]
+    schedule:
+      repository_scan: nightly
+      research: weekly
+      architecture_review: weekly
+    tags: [security, vulnerability-management, agents, fastapi, go, nuxt, docker]
+
+  - id: health-app
+    name: Health Exporter
+    source:
+      provider: github
+      url: git@github.com:MinatoNami/health-app.git
+      default_branch: main
+    workspace:
+      path: /Users/lionelchong/git-repos/health-app
+    enabled: true
+    capabilities:
+      research: true
+      analyze: true
+      plan: true
+      modify: false
+      create_branch: false
+      create_pr: false
+      merge: false
+    agents:
+      research: [chatgpt-work]
+      engineering: [codex, claude-code]
+      implementation: [claude-code, codex]
+    schedule:
+      repository_scan: nightly
+      research: weekly
+      architecture_review: weekly
+    tags: [ios, swift, healthkit, django, vue, self-hosted]
+
+  # Present on this machine but not registered. Add an entry to bring one in;
+  # nothing scans a repository that is not declared here.
+  #   alena-gateway
+  #   griffin-finance
+  #   telegram-stt
