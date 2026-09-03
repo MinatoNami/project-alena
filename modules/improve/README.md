@@ -183,6 +183,39 @@ endpoint cannot be reached, and the endpoint answered in a shape the client
 cannot read. Finding out which during a Thursday 02:00 escalation is the worst
 available time.
 
+### Proposing something yourself
+
+Research was the only way in, so somebody with an idea of their own had
+nowhere to put it. `propose` is that input — a form in the dashboard, or:
+
+```bash
+scripts/alena_improve.sh propose luma-index "Cache cover mosaics on disk" \
+  --body "The reader regenerates them on every load…"
+```
+
+It is **not a shortcut**. A proposal is de-duplicated, put to the engineering
+reviewer, scored and returned for the same human decision. Skipping review for
+ideas that came from a person would mean the review only ever scrutinises the
+suggestions nobody is attached to.
+
+What differs is the framing, and it is a third case rather than a softer
+version of the other two:
+
+| Origin | Framing | Risk being guarded against |
+|---|---|---|
+| Research | quarantined data, instructions inside it ignored | injection |
+| A `--focus` steer | an instruction to follow | — |
+| A proposal | a claim to judge, refusal explicitly invited | **agreement** |
+
+A proposal is not untrusted — it came through an interface only the operator
+can reach, so quarantining it would be theatre. The risk runs the other way: a
+reviewer saying yes because of who asked. So the prompt spends its words
+inviting refusal. An observation with no recorded origin gets the cautious
+framing.
+
+It works. Asked about a real proposal, Codex answered *"Rejected. The
+observation's premise is false"* and cited the four files showing why.
+
 ### Steering a run
 
 A manual scan or review takes a free-text steer — from the dashboard, or

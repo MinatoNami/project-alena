@@ -311,6 +311,7 @@ def record_observation(
     duplicate_reason: Optional[str] = None,
     similarity: float = 0.0,
     embedding: Optional[bytes] = None,
+    source: Optional[str] = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> int:
     conn = conn or get_connection()
@@ -318,8 +319,9 @@ def record_observation(
         """
         INSERT INTO observations
             (research_id, repository_id, created_at, title, normalized_title,
-             body, evidence, duplicate_of, duplicate_reason, similarity, embedding)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             body, evidence, duplicate_of, duplicate_reason, similarity,
+             embedding, source)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             research_id,
@@ -333,6 +335,7 @@ def record_observation(
             duplicate_reason,
             similarity,
             embedding,
+            source,
         ),
     )
     conn.commit()

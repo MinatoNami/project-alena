@@ -31,7 +31,7 @@ from .persistence import implementations_for, latest_scan, recommendations_for
 from .query import portfolio_snapshot, search_capability
 from .recommend.render import render_portfolio, write_portfolio
 from .registry import RegistryError, Repository, load_registry
-from .research import ingest_file, research_files
+from .research import ingest_file, propose, research_files
 from .review_run import escalate_repository, recommend_repository, review_repository
 from .scan_run import ScanOutcome, scan_repository
 from .wiring import install_gateway
@@ -628,6 +628,28 @@ def _condense(body: str) -> str:
     return "\n".join(out).rstrip() or "  (no detail recorded)"
 
 
+def cmd_propose(args: argparse.Namespace) -> int:
+    """Put an idea of your own into the pipeline."""
+    registry = load_registry(args.registry)
+    ensure_layout()
+    repository = registry.resolve(args.repository, "research")
+
+    body = args.body
+    if body is None:
+        if sys.stdin.isatty():
+            print("Describe it, then Ctrl-D:", file=sys.stderr)
+        body = sys.stdin.read()
+
+    result = propose(repository, args.title, body, evidence=args.evidence)
+    print(result.describe())
+    if result.duplicate:
+        return 0
+    if not result.ok:
+        return 2
+    print(f"  review it:  alena-improve review {repository.id}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     # Config paths are accepted both before and after the subcommand: the
     # natural thing to type is `scan --all --registry x`, but the global form
@@ -817,6 +839,19 @@ def build_parser() -> argparse.ArgumentParser:
     queue.add_argument("--all", action="store_true")
     queue.add_argument("--full", action="store_true", help="Print the whole body")
     queue.set_defaults(func=cmd_queue)
+
+    proposal = sub.add_parser(
+        "propose",
+        parents=[common],
+        help="Put an idea of your own into the pipeline, to be reviewed like any other",
+    )
+    proposal.add_argument("repository")
+    proposal.add_argument("title")
+    proposal.add_argument(
+        "--body", help="The detail. Read from stdin when not given."
+    )
+    proposal.add_argument("--evidence", help="Links or references, if any")
+    proposal.set_defaults(func=cmd_propose)
 
     return parser
 

@@ -50,9 +50,9 @@ import httpx
 from modules.core.controller.logger import logger
 
 from .prompting import (
-    UNTRUSTED_PREAMBLE,
     VERDICT_SCHEMA,
     observation_block,
+    preamble_for,
     rejected_block,
 )
 
@@ -156,7 +156,7 @@ def build_prompt(
 
     return f"""You are the independent engineering reviewer for {repository_name}.
 
-{UNTRUSTED_PREAMBLE}
+{preamble_for(observation.get("source"))}
 
 Do not modify anything. This is a read-only review.
 {rejected_block(rejected)}{codex_block}

@@ -35,10 +35,10 @@ from modules.core.controller.logger import logger
 from modules.gateway.errors import GatewayDenied
 
 from .prompting import (
-    UNTRUSTED_PREAMBLE,
     VERDICT_SCHEMA,
     observation_block,
     operator_note,
+    preamble_for,
     rejected_block,
 )
 
@@ -77,10 +77,10 @@ def build_prompt(
     rejected: Optional[List[Dict[str, Any]]] = None,
     note: Optional[str] = None,
 ) -> str:
-    return f"""You are reviewing a research observation against the repository you
-are running inside. Decide whether it makes engineering sense *here*.
+    return f"""You are reviewing a proposal against the repository you are
+running inside. Decide whether it makes engineering sense *here*.
 
-{UNTRUSTED_PREAMBLE}
+{preamble_for(observation.get("source"))}
 
 Do not modify anything. This is a read-only review.
 {operator_note(note)}{rejected_block(rejected)}

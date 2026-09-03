@@ -2,6 +2,7 @@
 const links = [
   { to: '/', label: 'Status' },
   { to: '/queue', label: 'Queue' },
+  { to: '/propose', label: 'Propose' },
   { to: '/repositories', label: 'Repositories' },
   { to: '/portfolio', label: 'Portfolio' },
   { to: '/tools', label: 'Tools' },

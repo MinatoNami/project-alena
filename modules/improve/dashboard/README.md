@@ -71,6 +71,16 @@ Runs are held in memory, so a restart forgets them, and the scheduled jobs run
 the same commands without appearing in the list. It is a view of what you
 started from here, not a history of everything that ran.
 
+## Proposing something
+
+A form for an idea of your own. It enters the pipeline where research does and
+is treated the same: de-duplicated, reviewed, scored, and brought back for
+your decision.
+
+The reviewer is told the proposal came from you and is asked for judgement
+rather than agreement — the failure mode for an operator's own idea is a
+reviewer that rubber-stamps it, so the prompt explicitly invites "no".
+
 ## Steering a run
 
 The run panel has a text box. What you type is appended to the analysis as

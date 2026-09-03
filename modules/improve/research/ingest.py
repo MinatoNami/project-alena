@@ -123,6 +123,7 @@ def ingest_text(
             duplicate_reason=verdict.reason,
             similarity=verdict.similarity,
             embedding=pack_embedding(embedding) if embedding else None,
+            source=parsed.source or source,
             conn=conn,
         )
         if verdict.duplicate:

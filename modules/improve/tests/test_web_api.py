@@ -295,3 +295,59 @@ def test_a_path_cannot_walk_out_of_the_build_directory(monkeypatch, tmp_path):
     for attempt in ("../secret.txt", "..%2Fsecret.txt", "_nuxt/../../secret.txt"):
         response = built.get(f"/{attempt}")
         assert "do not serve me" not in response.text
+
+
+# -- proposing an idea -----------------------------------------------------
+
+
+def test_proposing_records_an_observation(client):
+    response = client.post(
+        "/api/observations",
+        json={"repository_id": "sample", "title": "Cache thumbnails", "body": "Detail."},
+        headers=DASHBOARD,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["observation_id"]
+    assert not body["duplicate"]
+
+
+def test_proposing_the_same_thing_twice_says_so(client):
+    payload = {"repository_id": "sample", "title": "Cache thumbnails", "body": "Detail."}
+    client.post("/api/observations", json=payload, headers=DASHBOARD)
+
+    second = client.post("/api/observations", json=payload, headers=DASHBOARD).json()
+
+    assert second["duplicate"]
+    assert "duplicate" in second["duplicate_reason"]
+
+
+def test_proposing_needs_the_dashboard_header(client):
+    """It is state-changing, like every other write here."""
+    response = client.post(
+        "/api/observations",
+        json={"repository_id": "sample", "title": "X", "body": ""},
+    )
+
+    assert response.status_code == 403
+
+
+def test_proposing_for_an_unknown_repository_is_a_404(client):
+    response = client.post(
+        "/api/observations",
+        json={"repository_id": "nope", "title": "X", "body": ""},
+        headers=DASHBOARD,
+    )
+
+    assert response.status_code == 404
+
+
+def test_a_proposal_with_no_title_is_refused(client):
+    response = client.post(
+        "/api/observations",
+        json={"repository_id": "sample", "title": "", "body": "Detail."},
+        headers=DASHBOARD,
+    )
+
+    assert response.status_code == 422

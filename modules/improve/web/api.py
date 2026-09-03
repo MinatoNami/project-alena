@@ -119,6 +119,13 @@ async def guard(x_alena_dashboard: Optional[str] = Header(default=None)) -> None
     require_dashboard(x_alena_dashboard=x_alena_dashboard)
 
 
+class ProposalRequest(BaseModel):
+    repository_id: str
+    title: str = Field(..., min_length=1)
+    body: str = ""
+    evidence: Optional[str] = None
+
+
 class RunRequest(BaseModel):
     command: str = Field(..., description="A key from /api/commands")
     repository_id: Optional[str] = None
@@ -432,6 +439,35 @@ def create_app() -> FastAPI:
                     "authorises writing to a repository."
                 ),
             )
+
+    @app.post("/api/observations", dependencies=[Depends(guard)])
+    async def post_observation(payload: ProposalRequest) -> Dict[str, Any]:
+        """Put an idea of your own into the pipeline.
+
+        Not a shortcut: it is de-duplicated, reviewed and scored like anything
+        that arrived from research, and it ends at the same human decision.
+        """
+        from modules.improve.research import propose
+
+        try:
+            repository = registry().resolve(payload.repository_id, "research")
+        except RegistryError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from None
+
+        result = propose(
+            repository, payload.title, payload.body, evidence=payload.evidence
+        )
+        if not result.ok:
+            raise HTTPException(status_code=400, detail=result.error)
+
+        return {
+            "observation_id": result.observation_id,
+            "repository_id": result.repository_id,
+            "title": result.title,
+            "duplicate": result.duplicate,
+            "duplicate_reason": result.duplicate_reason,
+            "message": result.describe(),
+        }
 
     @app.get("/api/portfolio")
     async def get_portfolio() -> Dict[str, Any]:
