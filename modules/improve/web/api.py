@@ -31,10 +31,13 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from modules.improve import query
@@ -60,6 +63,15 @@ DEFAULT_PORT = 9100
 # preflight and every request from the dashboard silently cannot read a
 # response.
 DASHBOARD_PORT = 3100
+
+# The built dashboard. When it exists it is served from this app, which makes
+# the whole thing one process on one port -- no node at runtime, and the
+# browser is same-origin so CORS stops mattering at all. `npm run dev` on 3100
+# is still the way to work on it, and that path is cross-origin, which is why
+# the allowlist and the header guard remain.
+BUILT_DASHBOARD = (
+    Path(__file__).resolve().parents[1] / "dashboard" / ".output" / "public"
+)
 
 # The header that forces a preflight. Its value does not matter; its presence
 # is what an attacker's origin cannot arrange.
@@ -311,7 +323,61 @@ def create_app() -> FastAPI:
         catalog.register(static_contracts())
         return [m.to_dict() for m in tool_metrics(catalog)]
 
+    _mount_dashboard(app)
     return app
+
+
+def _mount_dashboard(app: FastAPI) -> None:
+    """Serve the built dashboard, if it has been built.
+
+    Missing is a normal state -- the API is useful on its own, and the built
+    output is not checked in. Saying so beats a bare 404 that reads like the
+    API is broken.
+    """
+    if not (BUILT_DASHBOARD / "index.html").exists():
+
+        @app.get("/")
+        async def not_built() -> Dict[str, Any]:
+            return {
+                "api": "ok",
+                "dashboard": "not built",
+                "build_it": "cd modules/improve/dashboard && npm install && npm run generate",
+                "or_run_dev": "scripts/start_alena_dashboard.sh",
+            }
+
+        return
+
+    app.mount(
+        "/_nuxt",
+        StaticFiles(directory=BUILT_DASHBOARD / "_nuxt"),
+        name="assets",
+    )
+
+    @app.get("/{path:path}", include_in_schema=False)
+    async def spa(path: str) -> FileResponse:
+        """Serve a file if it exists, otherwise the SPA shell.
+
+        A single-page app owns its own routing, so /queue is a client route
+        with no file behind it.
+
+        Anything under /api/ is excluded explicitly. Registration order alone
+        is not enough: a mistyped API path matches no route and would fall
+        through to here, and a client that asked for JSON should get a 404
+        rather than a page of HTML with a 200 on it.
+        """
+        if path.startswith("api/") or path == "api":
+            raise HTTPException(status_code=404, detail=f"No such endpoint: /{path}")
+
+        candidate = (BUILT_DASHBOARD / path).resolve()
+        # Resolve and confirm containment: a path like ../../.env would
+        # otherwise walk out of the build directory.
+        if (
+            path
+            and BUILT_DASHBOARD in candidate.parents
+            and candidate.is_file()
+        ):
+            return FileResponse(candidate)
+        return FileResponse(BUILT_DASHBOARD / "index.html")
 
 
 app = create_app()

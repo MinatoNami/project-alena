@@ -1,10 +1,14 @@
 /**
  * The one place that talks to the API.
  *
- * Every state-changing request carries X-Alena-Dashboard. The header's value
- * does not matter; sending a custom header at all forces a CORS preflight,
- * and an origin the API does not allowlist fails that preflight. Without it a
- * page you did not open could POST an approval to your loopback API and the
+ * `apiBase` is empty when the API is serving this app, so requests are
+ * origin-relative and CORS is not involved at all. It is absolute only under
+ * `npm run dev`, which runs on its own port.
+ *
+ * Either way, every state-changing request carries X-Alena-Dashboard. The
+ * value does not matter; sending a custom header at all forces a CORS
+ * preflight, and an origin the API does not allowlist fails it. Without that,
+ * a page you did not open could POST an approval to your loopback API and the
  * request would arrive.
  */
 export function useAlena() {

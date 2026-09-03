@@ -8,9 +8,11 @@ export default defineNuxtConfig({
   ssr: false,
   runtimeConfig: {
     public: {
-      // The API binds to loopback. It approves recommendations, and an
-      // approved recommendation is what authorises writing to a repository.
-      apiBase: process.env.NUXT_PUBLIC_ALENA_API || 'http://127.0.0.1:9100',
+      // Empty means origin-relative, which is what the built app wants: the
+      // API serves it, so the browser is same-origin and CORS never enters
+      // into it. `npm run dev` runs on its own port and needs the absolute
+      // URL, which the start script sets.
+      apiBase: process.env.NUXT_PUBLIC_ALENA_API || '',
     },
   },
   devServer: { host: '127.0.0.1', port: 3100 },

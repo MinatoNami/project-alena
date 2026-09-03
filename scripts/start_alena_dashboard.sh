@@ -5,8 +5,11 @@
 # recommendation is what authorises the action agent to write to a repository,
 # so the smallest exposure is the right default.
 #
-#   scripts/start_alena_dashboard.sh          # dev, with hot reload
-#   scripts/start_alena_dashboard.sh --api    # just the API
+#   scripts/start_alena_dashboard.sh          # dev, with hot reload on 3100
+#   scripts/start_alena_dashboard.sh --serve  # one process, serving the build
+#
+# --serve is what the launchd agent runs. It needs the dashboard built once:
+#   cd modules/improve/dashboard && npm install && npm run generate
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -32,9 +35,14 @@ trap cleanup EXIT
 cd "$ROOT_DIR"
 echo "API       http://127.0.0.1:${ALENA_DASHBOARD_PORT:-9100}"
 
-if [[ "${1:-}" == "--api" ]]; then
+# One process: the API serves the built dashboard from the same port, so
+# nothing node-shaped runs and the browser is same-origin.
+if [[ "${1:-}" == "--serve" || "${1:-}" == "--api" ]]; then
   exec "$PYTHON" -m modules.improve.web.api
 fi
+
+# Dev mode runs Nuxt on its own port, so the app needs the absolute API URL.
+export NUXT_PUBLIC_ALENA_API="http://127.0.0.1:${ALENA_DASHBOARD_PORT:-9100}"
 
 "$PYTHON" -m modules.improve.web.api &
 API_PID=$!

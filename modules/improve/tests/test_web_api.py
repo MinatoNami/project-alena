@@ -242,3 +242,56 @@ def test_the_api_offers_no_way_to_implement(client):
     """Writing to a repository is not something a browser initiates here."""
     paths = {route.path for route in client.app.routes}
     assert not any("implement" in path for path in paths)
+
+
+# -- serving the built dashboard -------------------------------------------
+
+
+def test_an_unknown_api_path_is_a_json_404(client):
+    """The SPA fallback must not answer for /api. A client that asked for JSON
+    and got a page of HTML with a 200 on it has no way to tell."""
+    response = client.get("/api/definitely-not-a-route")
+
+    assert response.status_code == 404
+    assert response.headers["content-type"].startswith("application/json")
+
+
+def test_the_root_says_how_to_build_when_the_dashboard_is_not_built(monkeypatch, tmp_path):
+    """Missing is a normal state -- the API is useful on its own."""
+    from modules.improve.web import api as api_module
+
+    monkeypatch.setattr(api_module, "BUILT_DASHBOARD", tmp_path / "nothing")
+    built = TestClient(api_module.create_app())
+
+    body = built.get("/").json()
+    assert body["dashboard"] == "not built"
+    assert "npm run generate" in body["build_it"]
+
+
+def test_a_client_route_falls_through_to_the_shell(monkeypatch, tmp_path):
+    """A single-page app owns its own routing; /queue has no file behind it."""
+    from modules.improve.web import api as api_module
+
+    public = tmp_path / "public"
+    (public / "_nuxt").mkdir(parents=True)
+    (public / "index.html").write_text("<html>shell</html>")
+    monkeypatch.setattr(api_module, "BUILT_DASHBOARD", public)
+    built = TestClient(api_module.create_app())
+
+    assert built.get("/queue").text == "<html>shell</html>"
+    assert built.get("/repositories/luma-index").text == "<html>shell</html>"
+
+
+def test_a_path_cannot_walk_out_of_the_build_directory(monkeypatch, tmp_path):
+    from modules.improve.web import api as api_module
+
+    public = tmp_path / "public"
+    (public / "_nuxt").mkdir(parents=True)
+    (public / "index.html").write_text("<html>shell</html>")
+    (tmp_path / "secret.txt").write_text("do not serve me")
+    monkeypatch.setattr(api_module, "BUILT_DASHBOARD", public)
+    built = TestClient(api_module.create_app())
+
+    for attempt in ("../secret.txt", "..%2Fsecret.txt", "_nuxt/../../secret.txt"):
+        response = built.get(f"/{attempt}")
+        assert "do not serve me" not in response.text

@@ -4,9 +4,21 @@ Nuxt 4 + Tailwind, over a FastAPI adapter. Five pages: status, the approval
 queue, repositories, portfolio, tool metrics.
 
 ```bash
-scripts/start_alena_dashboard.sh        # API on 9100, Nuxt on 3100
-scripts/start_alena_dashboard.sh --api  # just the API
+scripts/start_alena_dashboard.sh          # dev, hot reload on 3100
+scripts/start_alena_dashboard.sh --serve  # one process on 9100
 ```
+
+`--serve` is what runs in the background: the API serves the built dashboard
+from its own port, so there is one Python process, no node, and the browser
+is same-origin. Build it first, and again after any UI change:
+
+```bash
+cd modules/improve/dashboard && npm install && npm run generate
+```
+
+To have it always running, see
+[deploy/launchd](../../../deploy/launchd/README.md) — it installs as a
+service rather than a scheduled job.
 
 ## It is a third adapter, not a third implementation
 
