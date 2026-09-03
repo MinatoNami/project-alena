@@ -355,6 +355,17 @@ to it directly, with the gateway nowhere in the path.
 
 `modules/improve/query.py` holds the functions; the server only adapts them.
 
+## A browser, if you prefer one
+
+```bash
+scripts/start_alena_dashboard.sh     # API on 9100, Nuxt on 3100
+```
+
+Status, the approval queue, repositories, portfolio and tool metrics, with
+accept and reject in the queue. Both processes bind to loopback, and
+implementing stays a command you watch rather than a button.
+See [dashboard/README.md](dashboard/README.md).
+
 ## Using it day to day
 
 Two commands cover it.

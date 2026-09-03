@@ -14,8 +14,9 @@ from __future__ import annotations
 import os
 import re
 import sqlite3
+import threading
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 _MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 _MIGRATION_FILENAME = re.compile(r"^(\d{3})_.+\.sql$")
@@ -89,20 +90,52 @@ def connect(path: Optional[str] = None) -> sqlite3.Connection:
     return conn
 
 
-_shared: Optional[sqlite3.Connection] = None
+# One connection per thread, not one per process.
+#
+# sqlite3 refuses a connection used from a thread other than the one that
+# created it, and a web server is multi-threaded -- Starlette runs endpoints on
+# a portal thread, and not necessarily the same one each time. A single shared
+# connection works perfectly until the API is added, then fails on the second
+# request from a new thread.
+#
+# Thread-local rather than check_same_thread=False, because that flag only
+# silences the check; it does not make concurrent use safe. WAL mode, set in
+# connect(), is what lets these read alongside a writer.
+_local = threading.local()
+# Every connection handed out, so reset_connection() can close the ones this
+# thread did not create. Tests repoint ALENA_DB_PATH between cases and a
+# connection left open on a server thread would keep serving the old file.
+_opened: List[sqlite3.Connection] = []
+_opened_lock = threading.Lock()
 
 
 def get_connection() -> sqlite3.Connection:
-    """The process-wide connection, opened on first use."""
-    global _shared
-    if _shared is None:
-        _shared = connect()
-    return _shared
+    """This thread's connection, opened on first use."""
+    existing = getattr(_local, "conn", None)
+    if existing is not None:
+        return existing
+
+    conn = connect()
+    _local.conn = conn
+    with _opened_lock:
+        _opened.append(conn)
+    return conn
 
 
 def reset_connection() -> None:
-    """Drop the shared connection. For tests that repoint ALENA_DB_PATH."""
-    global _shared
-    if _shared is not None:
-        _shared.close()
-    _shared = None
+    """Close every connection this process has opened.
+
+    For tests that repoint ALENA_DB_PATH, and for anything that needs the next
+    caller to reopen against a different file.
+    """
+    with _opened_lock:
+        connections, _opened[:] = list(_opened), []
+    for conn in connections:
+        try:
+            conn.close()
+        except sqlite3.Error:
+            # Closing from a different thread than it was created on raises,
+            # and there is nothing useful to do about it -- the connection is
+            # being discarded either way.
+            pass
+    _local.conn = None

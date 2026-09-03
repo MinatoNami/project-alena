@@ -63,3 +63,59 @@ def test_migration_filenames_must_be_ordered():
     """A migration without a numeric prefix has no defined position."""
     for _, path in db_module._discover_migrations():
         assert path.name[:3].isdigit()
+
+
+def test_each_thread_gets_its_own_connection(tmp_path, monkeypatch):
+    """A single shared connection works until the web API is added, then
+    sqlite3 refuses it from the server's thread."""
+    import threading
+
+    from modules.store import db, get_connection
+
+    monkeypatch.setenv("ALENA_DB_PATH", str(tmp_path / "threads.db"))
+    db.reset_connection()
+
+    seen = {}
+
+    def use_it(name):
+        conn = get_connection()
+        conn.execute("SELECT COUNT(*) FROM tool_invocations").fetchone()
+        seen[name] = id(conn)
+
+    use_it("main")
+    worker = threading.Thread(target=use_it, args=("worker",))
+    worker.start()
+    worker.join()
+
+    assert len(seen) == 2
+    assert seen["main"] != seen["worker"]
+    db.reset_connection()
+
+
+def test_a_connection_is_reused_within_a_thread(tmp_path, monkeypatch):
+    from modules.store import db, get_connection
+
+    monkeypatch.setenv("ALENA_DB_PATH", str(tmp_path / "reuse.db"))
+    db.reset_connection()
+
+    assert get_connection() is get_connection()
+    db.reset_connection()
+
+
+def test_reset_closes_connections_other_threads_opened(tmp_path, monkeypatch):
+    """Tests repoint ALENA_DB_PATH between cases; a connection left open on a
+    server thread would keep serving the old file."""
+    import threading
+
+    from modules.store import db, get_connection
+
+    monkeypatch.setenv("ALENA_DB_PATH", str(tmp_path / "a.db"))
+    db.reset_connection()
+
+    worker = threading.Thread(target=get_connection)
+    worker.start()
+    worker.join()
+
+    assert db._opened
+    db.reset_connection()
+    assert db._opened == []
