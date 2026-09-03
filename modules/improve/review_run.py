@@ -44,8 +44,11 @@ class ReviewRun:
     failed: List[str] = field(default_factory=list)
     skipped: int = 0
     considered: int = 0
+    note: Optional[str] = None
 
     def describe(self) -> str:
+        if self.note:
+            return f"{self.repository_id}: {self.agent}: {self.note}"
         parts = [f"{self.agent}: {len(self.reviewed)} reviewed"]
         if self.failed:
             parts.append(f"{len(self.failed)} failed")
@@ -154,9 +157,25 @@ def escalate_repository(
     bill.
     """
     repository.require("analyze")
-    upsert_repository(repository, conn)
     run = ReviewRun(repository.id, agent="claude")
 
+    # Checked once, before anything is recorded. Without this, an unconfigured
+    # routine produces one errored `claude` review per candidate -- and because
+    # an errored review counts as attempted, every one of those candidates is
+    # then silently never escalated again, including after a routine is set up.
+    # A missing URL is an operator problem, not a per-candidate failure.
+    if not dry_run and caller is None:
+        try:
+            claude_review.RoutineConfig.from_env()
+        except claude_review.RoutineNotConfigured as exc:
+            run.note = (
+                "no routine configured, so nothing was escalated and nothing "
+                f"was recorded. {exc}"
+            )
+            logger.info(f"{repository.id}: {run.note}")
+            return run
+
+    upsert_repository(repository, conn)
     scan = latest_scan(repository.id, conn)
     context = _context_text(repository, scan)
     rejected = recommendations_by_status(repository.id, conn)["rejected"]

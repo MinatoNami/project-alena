@@ -258,3 +258,71 @@ async def test_retry_failed_re_attempts_a_broken_escalation(repository):
     retried = escalate_repository(repository, caller=working, retry_failed=True)
 
     assert len(retried.reviewed) == 1
+
+
+# -- running without a routine at all --------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_an_unconfigured_routine_records_nothing(repository, monkeypatch):
+    """Otherwise every candidate gets an errored `claude` review, which counts
+    as attempted -- and none of them is ever escalated again, including after
+    a routine is finally set up."""
+    monkeypatch.delenv("CLAUDE_ROUTINE_URL", raising=False)
+    await prepare(repository)
+
+    run = escalate_repository(repository)
+
+    assert run.reviewed == []
+    assert run.failed == []
+    assert "no routine configured" in run.describe()
+
+    observation = next(
+        o for o in observations_for(repository.id) if o["title"].startswith("Local OCR")
+    )
+    assert {r["agent"] for r in reviews_for(observation["id"])} == {"codex"}
+
+
+@pytest.mark.asyncio
+async def test_a_candidate_still_escalates_once_a_routine_appears(
+    repository, monkeypatch
+):
+    monkeypatch.delenv("CLAUDE_ROUTINE_URL", raising=False)
+    await prepare(repository)
+    escalate_repository(repository)
+
+    def caller(prompt, **kwargs):
+        return '{"verdict": "supported", "confidence": 0.9}'
+
+    later = escalate_repository(repository, caller=caller)
+
+    assert len(later.reviewed) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_dry_run_works_without_a_routine(repository, monkeypatch):
+    """Reading the escalation rate should not need an endpoint."""
+    monkeypatch.delenv("CLAUDE_ROUTINE_URL", raising=False)
+    await prepare(repository)
+
+    run = escalate_repository(repository, dry_run=True)
+
+    assert len(run.reviewed) == 1
+    assert run.note is None
+
+
+@pytest.mark.asyncio
+async def test_a_configured_but_broken_routine_still_records_a_failure(
+    repository, monkeypatch
+):
+    """Unreachable is a real attempt; unconfigured is not. They are different."""
+    monkeypatch.setenv("CLAUDE_ROUTINE_URL", "https://routine.test/run")
+    await prepare(repository)
+
+    def unreachable(prompt, **kwargs):
+        raise RuntimeError("connect timeout")
+
+    run = escalate_repository(repository, caller=unreachable)
+
+    assert len(run.failed) == 1
+    assert run.note is None

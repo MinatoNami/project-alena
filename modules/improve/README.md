@@ -150,6 +150,26 @@ explicit contract (POST a prompt; take an answer, or a job id to poll) and
 reads responses tolerantly. If the real envelope differs, `extract_text` in
 `agents/claude_review.py` is the single place to adjust.
 
+**Not having a routine is a supported state.** The escalation pass checks for
+`CLAUDE_ROUTINE_URL` once, and if it is missing it does nothing and records
+nothing:
+
+```
+luma-index: claude: no routine configured, so nothing was escalated and
+nothing was recorded.
+```
+
+That the check is up front rather than per candidate matters more than it
+looks. Recording an errored `claude` review against each candidate would count
+as an attempt, and an attempted candidate is never escalated again — so an
+unconfigured routine would quietly disqualify every candidate it touched,
+including from the escalation that runs after a routine is finally set up.
+`--retry-failed` would be the only way back, and nobody would know to reach
+for it.
+
+Everything else works without a routine: scanning, research, Codex review,
+scoring, the approval gate and the action agent.
+
 Which is why there is a check. After setting `CLAUDE_ROUTINE_URL`, run it
 before trusting anything else:
 
