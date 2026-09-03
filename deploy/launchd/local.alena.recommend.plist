@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Thursday morning: score everything reviewed, write the reports, refresh the
+  portfolio view. Local only.
+
+  The Claude escalation step is deliberately not scheduled here. Run it in
+  dry-run mode for a week and read the escalation rate before putting it on a
+  timer. See the README in this directory.
+
+  Replace /Users/YOU with your path before installing.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>local.alena.recommend</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>/Users/YOU/git-repos/project-alena/scripts/alena_improve.sh recommend --all &amp;&amp; /Users/YOU/git-repos/project-alena/scripts/alena_improve.sh portfolio</string>
+  </array>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Weekday</key><integer>4</integer>
+    <key>Hour</key><integer>7</integer>
+    <key>Minute</key><integer>0</integer>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/Users/YOU/.alena/logs/recommend.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/YOU/.alena/logs/recommend.log</string>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/YOU/git-repos/project-alena</string>
+
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>

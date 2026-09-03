@@ -138,7 +138,8 @@ Notes:
   independent engineering reviewers, a human approval gate, an action agent
   that writes a reviewed branch (nothing is pushed), portfolio intelligence,
   and [an MCP server](modules/mcp/alena-core/README.md) exposing all of it.
-  See [modules/improve](modules/improve/README.md),
+  Tool metrics and [launchd templates](deploy/launchd/README.md) included;
+  nothing is scheduled for you. See [modules/improve](modules/improve/README.md),
   [the research contract](Documents/RESEARCH_DOCUMENT_CONTRACT.md) and
   [the implementation plan](Documents/ALENA_IMPROVE_IMPLEMENTATION_PLAN.md)
 - 🚧 Adaptive learning (currently stateless; KB + LLM-generated MCP servers coming next)

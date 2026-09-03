@@ -313,6 +313,55 @@ Nightly, via launchd:
 <dict><key>Hour</key><integer>2</integer><key>Minute</key><integer>0</integer></dict>
 ```
 
+## Are the tools earning their place?
+
+```bash
+scripts/alena_improve.sh tools
+scripts/alena_improve.sh tools --attention     # only what needs looking at
+```
+
+Computed from the gateway's audit log, which has been recording every
+invocation since Phase 0. Four verdicts:
+
+| Verdict | Meaning |
+|---|---|
+| `healthy` | used, and mostly working |
+| `failing` | more than a quarter of calls that reached it errored |
+| `contested` | more than a quarter were *refused* |
+| `unused` | never called, and there is enough history for that to mean something |
+| `unproven` | never called, but the log is too thin to conclude anything |
+
+`contested` is the one to watch. An agent repeatedly reaching for a capability
+the policy will not give it is the signal the addendum's tool-proposal
+lifecycle is meant to act on: either the catalog is missing something, or the
+policy is wrong about who should have it.
+
+The `unproven` distinction exists because a young audit log looks exactly like
+a catalog full of dead tools, and advising someone to retire nineteen working
+tools because a test database has two rows is confidently wrong. Both enough
+calls and enough days are required before an absence counts as evidence.
+
+Two of the addendum's dimensions are **not** measured, and the code says so
+rather than approximating them. *Token savings* would mean comparing against
+the reconstruction a tool replaced, and nothing records what an agent would
+have done instead. *Accuracy* cannot be seen at all — a tool returning
+something wrong looks exactly like one returning something right. So the
+utility score is about use and reliability, not value: it answers "is this
+earning its place in the catalog", not "is this tool good".
+
+## Running it unattended
+
+[`deploy/launchd/`](../../deploy/launchd/README.md) has templates for the
+spec's weekly cadence — nightly scan, Wednesday review, Thursday
+recommendations. Nothing is installed for you: a launchd job is a persistent
+change that starts running software on a timer.
+
+Two things are deliberately absent from every template, and there are tests
+asserting it. `implement` writes to a repository and requires a recorded human
+acceptance, so putting it on a timer would give the approval gate a way
+around itself. And a live Claude escalation stays a deliberate act until you
+have watched its rate in dry-run for a while.
+
 ## Where things live
 
 | | Default | Override |
@@ -362,3 +411,22 @@ pytest modules/improve -v
 
 The scanner tests run against a real git repository built in `tmp_path`. A
 faked `git` would only prove the fake behaves as expected.
+
+## What is deliberately not built
+
+The addendum's **Tool Builder** — agents proposing, building and promoting
+their own tools — is not here, and the reason is the order it has to happen
+in.
+
+The creation thresholds it specifies ("the same operation three times",
+"more than 5,000 tokens saved per run") are not opinions, they are
+measurements. Nothing could evaluate them until the audit log had run for a
+while, which is why metrics came first and why they honestly report that token
+savings is one of the things they cannot see.
+
+So the honest position is that Stage 5 of the long-term vision — *agents
+measure tool effectiveness* — is now possible, and Stages 6 and 7 wait on
+having something real to measure. The `contested` verdict is where a genuine
+tool proposal will come from: a capability agents keep reaching for and being
+refused. Building the promotion lifecycle before anything has produced that
+signal would mean guessing at what tools to build a factory for.

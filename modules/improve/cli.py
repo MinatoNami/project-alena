@@ -371,6 +371,78 @@ def cmd_portfolio(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_tools(args: argparse.Namespace) -> int:
+    """Tool effectiveness, from the gateway's audit log."""
+    import asyncio
+
+    from modules.gateway.catalog import (
+        ToolCatalog,
+        discover_into,
+        static_contracts,
+    )
+    from modules.gateway.metrics import (
+        audit_basis,
+        needing_attention,
+        tool_metrics,
+    )
+    from modules.gateway.policy import load_policy
+    from modules.gateway.pool import close_pool
+
+    catalog = ToolCatalog(load_policy(args.policy))
+    catalog.register(static_contracts())
+
+    if not args.no_discovery:
+        async def _discover():
+            try:
+                await discover_into(catalog)
+            finally:
+                await close_pool()
+
+        asyncio.run(_discover())
+
+    basis = audit_basis()
+    metrics = tool_metrics(catalog)
+    if args.attention:
+        metrics = needing_attention(metrics)
+        if not metrics:
+            print("Every tool in the catalog looks healthy.")
+            return 0
+
+    if args.json:
+        print(json.dumps([m.to_dict() for m in metrics], indent=2))
+        return 0
+
+    width = max((len(m.tool) for m in metrics), default=10)
+    print(f"{'tool':<{width}}  {'health':<10} {'util':>5} {'calls':>6} {'ok':>4} "
+          f"{'err':>4} {'deny':>5} {'median':>9}")
+    for m in metrics:
+        median = f"{m.median_ms:.0f}ms" if m.median_ms is not None else "-"
+        print(
+            f"{m.tool:<{width}}  {m.health:<10} {m.utility:5.2f} {m.invocations:6} "
+            f"{m.successes:4} {m.failures:4} {m.denials:5} {median:>9}"
+        )
+
+    advice = [(m.tool, m.advice()) for m in metrics if m.advice()]
+    if advice:
+        print()
+        for tool, note in advice:
+            print(f"  {tool}: {note}")
+
+    print()
+    if basis["judgeable"]:
+        print(
+            f"Based on {basis['invocations']} invocations over "
+            f"{basis['days']} days."
+        )
+    else:
+        print(
+            f"Based on {basis['invocations']} invocations over "
+            f"{basis['days']} days -- too little to conclude a tool is unused, "
+            "so those are marked `unproven` rather than flagged for retirement."
+        )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     # Config paths are accepted both before and after the subcommand: the
     # natural thing to type is `scan --all --registry x`, but the global form
@@ -521,6 +593,20 @@ def build_parser() -> argparse.ArgumentParser:
         "--capability", help="Which repositories already use this technology"
     )
     portfolio.set_defaults(func=cmd_portfolio)
+
+    tools = sub.add_parser(
+        "tools", parents=[common], help="Tool effectiveness from the audit log"
+    )
+    tools.add_argument("--json", action="store_true")
+    tools.add_argument(
+        "--attention", action="store_true", help="Only tools that need looking at"
+    )
+    tools.add_argument(
+        "--no-discovery",
+        action="store_true",
+        help="Skip starting the MCP servers to enumerate their tools",
+    )
+    tools.set_defaults(func=cmd_tools)
 
     return parser
 
