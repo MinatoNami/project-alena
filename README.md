@@ -130,7 +130,9 @@ Notes:
 - ✅ Codex MCP server integration (tool executor wired)
 - ✅ Tool Gateway (policy, approval, audit log, pooled MCP sessions)
 - 🚧 MCP server expansion (more MCPs planned)
-- 🚧 Autonomous codebase improvement system — see
+- 🚧 Autonomous codebase improvement system — repository intelligence works
+  (`scripts/alena_improve.sh scan --all`); research and review agents next.
+  See [modules/improve](modules/improve/README.md) and
   [the implementation plan](Documents/ALENA_IMPROVE_IMPLEMENTATION_PLAN.md)
 - 🚧 Adaptive learning (currently stateless; KB + LLM-generated MCP servers coming next)
 
