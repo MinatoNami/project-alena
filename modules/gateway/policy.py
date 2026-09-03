@@ -48,17 +48,32 @@ class PolicyDecision:
 
 @dataclass(frozen=True)
 class ToolPolicy:
-    """Policy for one tool."""
+    """Policy for one tool.
+
+    `requires_approval` is per agent, not per tool. The interactive assistant
+    editing a file when its user asked it to is a different act from an
+    autonomous run editing a repository overnight, and they need different
+    answers for the same tool. `true` means every agent, a list means those
+    agents, `false` means none.
+    """
 
     name: str
     side_effect: SideEffect
     allowed_agents: List[str] = field(default_factory=list)
     repositories: List[str] = field(default_factory=lambda: ["*"])
     requires_approval: bool = False
+    approval_agents: List[str] = field(default_factory=list)
 
     def permits_agent(self, agent: str) -> bool:
         return any(
             pattern == "*" or pattern == agent for pattern in self.allowed_agents
+        )
+
+    def needs_approval_from(self, agent: str) -> bool:
+        if self.requires_approval:
+            return True
+        return any(
+            pattern == "*" or pattern == agent for pattern in self.approval_agents
         )
 
     def permits_repository(self, repository_id: Optional[str]) -> bool:
@@ -164,7 +179,7 @@ class Policy:
                     return decision
 
         return PolicyDecision(
-            allowed=True, requires_approval=tool_policy.requires_approval
+            allowed=True, requires_approval=tool_policy.needs_approval_from(agent)
         )
 
 
@@ -195,7 +210,13 @@ def parse_policy(data: Any) -> Policy:
 
     default_agents = _as_list(defaults.get("allowed_agents"), "allowed_agents", "defaults")
     default_repos = _as_list(defaults.get("repositories"), "repositories", "defaults") or ["*"]
-    default_approval = bool(defaults.get("requires_approval", False))
+    raw_default_approval = defaults.get("requires_approval", False)
+    default_approval = raw_default_approval is True
+    default_approval_agents = (
+        _as_list(raw_default_approval, "requires_approval", "defaults")
+        if isinstance(raw_default_approval, (str, list))
+        else []
+    )
 
     tools: Dict[str, ToolPolicy] = {}
     raw_tools = data.get("tools") or {}
@@ -211,6 +232,15 @@ def parse_policy(data: Any) -> Policy:
                 f"{name} does not declare a side_effect. Every tool must declare "
                 "its impact before it can be called."
             )
+        raw_approval = raw.get("requires_approval", None)
+        if raw_approval is None:
+            approval, approval_agents = default_approval, default_approval_agents
+        elif isinstance(raw_approval, (str, list)):
+            approval = False
+            approval_agents = _as_list(raw_approval, "requires_approval", name)
+        else:
+            approval, approval_agents = bool(raw_approval), []
+
         tools[name] = ToolPolicy(
             name=name,
             side_effect=SideEffect.parse(str(raw["side_effect"])),
@@ -218,7 +248,8 @@ def parse_policy(data: Any) -> Policy:
             or default_agents,
             repositories=_as_list(raw.get("repositories"), "repositories", name)
             or default_repos,
-            requires_approval=bool(raw.get("requires_approval", default_approval)),
+            requires_approval=approval,
+            approval_agents=approval_agents,
         )
 
     repositories: Dict[str, RepositoryToolPolicy] = {}

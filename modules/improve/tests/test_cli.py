@@ -205,3 +205,87 @@ def test_review_dry_run_reports_what_would_escalate(registry_file, capsys):
 def test_review_defaults_to_codex(registry_file, capsys):
     assert run("review", "sample", "--registry", registry_file) == 0
     assert "codex:" in capsys.readouterr().out
+
+
+# --- Phase 4 commands ------------------------------------------------------
+
+
+@pytest.fixture
+def accepted_recommendation(repo, registry_file):
+    from modules.improve.persistence import (
+        record_observation,
+        record_research,
+        upsert_recommendation,
+        upsert_repository,
+    )
+    from modules.improve.registry import load_registry
+
+    repository = load_registry(registry_file).resolve("sample")
+    upsert_repository(repository)
+    research_id, _ = record_research(
+        repository_id="sample", source="test", content="# R", content_hash="h"
+    )
+    observation_id = record_observation(
+        research_id=research_id,
+        repository_id="sample",
+        title="A change",
+        normalized_title="a change",
+        body="...",
+        evidence=None,
+    )
+    return upsert_recommendation(
+        repository_id="sample",
+        observation_id=observation_id,
+        title="A change",
+        normalized_title="a change",
+        body="...",
+        score=0.8,
+    )
+
+
+def test_pending_lists_undecided_recommendations(registry_file, accepted_recommendation, capsys):
+    assert run("pending", "sample", "--registry", registry_file) == 0
+    assert "A change" in capsys.readouterr().out
+
+
+def test_decide_accepts(registry_file, accepted_recommendation, capsys):
+    assert run("decide", "sample", str(accepted_recommendation), "--accept", "--registry", registry_file) == 0
+    out = capsys.readouterr().out
+    assert "recommended → accepted" in out
+    assert "alena-improve implement sample" in out
+
+
+def test_decide_refuses_a_rejection_without_a_reason(registry_file, accepted_recommendation, capsys):
+    assert run("decide", "sample", str(accepted_recommendation), "--reject", "--registry", registry_file) == 2
+    assert "requires a reason" in capsys.readouterr().err
+
+
+def test_decide_refuses_two_outcomes_at_once(registry_file, accepted_recommendation, capsys):
+    assert run(
+        "decide", "sample", str(accepted_recommendation), "--accept", "--abandon",
+        "--reason", "x", "--registry", registry_file,
+    ) == 2
+    assert "exactly one" in capsys.readouterr().err
+
+
+def test_decide_refuses_an_illegal_transition(registry_file, accepted_recommendation, capsys):
+    assert run(
+        "decide", "sample", str(accepted_recommendation), "--successful", "--registry", registry_file
+    ) == 2
+    assert "Cannot go from" in capsys.readouterr().err
+
+
+def test_implement_refuses_a_read_only_repository(registry_file, accepted_recommendation, capsys):
+    run("decide", "sample", str(accepted_recommendation), "--accept", "--registry", registry_file)
+    capsys.readouterr()
+
+    assert run("implement", "sample", str(accepted_recommendation), "--registry", registry_file) == 2
+    assert "modify" in capsys.readouterr().err
+
+
+def test_trail_shows_the_decision_history(registry_file, accepted_recommendation, capsys):
+    run("decide", "sample", str(accepted_recommendation), "--accept", "--registry", registry_file)
+    capsys.readouterr()
+
+    assert run("trail", "sample", str(accepted_recommendation), "--registry", registry_file) == 0
+    assert "recommended -> accepted" in capsys.readouterr().out

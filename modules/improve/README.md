@@ -130,6 +130,92 @@ A missing dimension defaults to 0.5, not 0: a candidate whose review failed
 should land mid-table where a human sees it, not at the bottom where nobody
 looks.
 
+## The approval gate
+
+Nothing becomes code without a recorded human decision.
+
+```
+recommend ──► recommended ──┬──► accepted ──┬──► implemented ──┬──► successful
+                            │               │                  ├──► unsuccessful
+                            │               └──► abandoned      └──► abandoned
+                            └──► rejected ──► (revisit) ──► recommended
+```
+
+The transitions are a closed set, not an UPDATE anyone can make, and decisions
+are appended rather than overwritten — "accepted, then abandoned three weeks
+later" is a different fact from "abandoned", and only one of them survives an
+overwrite.
+
+A rejection or an abandonment **requires** a reason. That is not paperwork: the
+reason goes into the context package, the next reviewer's prompt, and
+de-duplication. A rejection without one means the same idea arrives next month
+with nothing to recognise it by.
+
+The report's `[ ] Accept` block stays a view. `alena-improve decide` is what
+records anything.
+
+## The action agent
+
+The only thing in ALENA that writes to a repository, and every one of these has
+to hold before it starts:
+
+| Gate | Why |
+|---|---|
+| `capabilities.modify` and `create_branch` in the registry | opt-in per repository |
+| recommendation status is `accepted` | a human said so |
+| working tree completely clean, untracked files included | the commit stages everything |
+| a fresh `alena/<id>-<slug>` branch | the base branch is never committed to |
+
+### Permission lasts one run
+
+Accepting a recommendation issues an `ActionGrant`: scoped to one repository,
+capped at `repository_write`, carrying the recommendation id as its authority,
+and dropped in a `finally` when the run ends. A grant that outlives its run is
+a standing write permission nobody remembers issuing.
+
+Two limits make a grant safe to hand out. It **satisfies** the approval the
+policy demands; it never adds a tool the policy would refuse — an agent outside
+`allowed_agents` stays refused with a grant in hand. And it is **capped at
+`repository_write`**, so it can authorise a branch and a commit but never a
+push, a pull request, an infrastructure change or anything destructive. Those
+leave the machine or cannot be undone, and each needs its own explicit human
+act rather than riding along with "yes, implement this".
+
+Approval is now per agent in `tool_policy.yaml`. A user asking the assistant to
+edit a file *is* the approval; an autonomous run needs an accepted
+recommendation. Same tool, different answer:
+
+```yaml
+codex_edit:
+  allowed_agents: ["assistant", "action-agent"]
+  requires_approval: ["action-agent"]
+```
+
+### Nothing is pushed
+
+There is no push and no pull-request step. The agent leaves a branch with a
+commit, the tests it could run, and an independent review of the diff. Merging
+is yours.
+
+### Cross review
+
+The spec wants the opposite model to review, so no model both proposes and
+blesses its own work. Writing to a repository means running a tool on this
+machine through the gateway, and the only agent wired that way is Codex — a
+Claude routine can read a diff but cannot commit to a workspace here. So the
+pairing is currently fixed rather than alternating: **Codex implements, Claude
+reviews.** The independent-check property holds, which is the part that
+matters, and `action/routing.py` is data so the rotation starts working when
+Claude gains a local write path.
+
+### On failure, nothing is left behind
+
+A failed run reverts tracked files, removes what the agent created, returns to
+the base branch and deletes its own branch. Removing untracked files is safe
+*because* of the pre-flight check: the tree was completely clean before the run,
+so anything untracked afterwards is the agent's own output. The implementation
+row is written before any of this, so a half-finished branch can still be found.
+
 ## Commands
 
 ```bash
@@ -147,7 +233,19 @@ scripts/alena_improve.sh ingest-research luma-index r.md       # take a report
 scripts/alena_improve.sh ingest-research luma-index --from-dir ~/drop
 scripts/alena_improve.sh review luma-index                     # Codex, read-only
 scripts/alena_improve.sh recommend luma-index                  # score and report
+
+scripts/alena_improve.sh pending                               # awaiting a decision
+scripts/alena_improve.sh decide luma-index 3 --accept
+scripts/alena_improve.sh decide luma-index 4 --reject --reason "too early"
+scripts/alena_improve.sh implement luma-index 3                # writes a branch
+scripts/alena_improve.sh trail luma-index 3                    # what happened
+scripts/alena_improve.sh decide luma-index 3 --successful \
+    --actual-effort LARGE --observed-value 0.8
 ```
+
+The last one closes the loop the spec asks for: estimated against actual
+effort, expected against observed value. None of it can be recovered after the
+fact, and it is what the scoring weights get fitted to later.
 
 Every trigger is a subcommand rather than a scheduler inside the application:
 launchd survives reboots, a subcommand can be re-run by hand when something
@@ -188,6 +286,8 @@ modules/improve/
 ├── research/          parse and ingest external research
 ├── agents/            Codex engineering review, through the gateway
 ├── recommend/         dedup, scoring, synthesis, markdown
+├── action/            the action agent, cross-review routing, test running
+├── decide.py          the approval gate and its state machine
 ├── text.py            shared normalisation (owned by neither, to avoid a cycle)
 ├── context_package.py the .context/ bundle every agent reads
 ├── persistence.py     SQLite reads and writes

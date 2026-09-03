@@ -11,12 +11,14 @@
 #   read_only  local_write  repository_write  remote_write
 #   infrastructure_change  destructive
 #
-# NOTE ON APPROVAL: every `requires_approval` below is false today, because
-# Phase 0 introduces the gateway without changing what the assistant is
-# already allowed to do. The classifications are correct now; the approval
-# gate is turned on in Phase 4, when there is a human flow to approve
-# *through*. Flipping one of these to true before then will simply refuse the
-# call -- which may be what you want for codex_edit.
+# APPROVAL IS PER AGENT. `requires_approval: true` means every agent;
+# a list means those agents. The interactive assistant editing a file because
+# its user just asked it to is a different act from an autonomous run editing
+# a repository overnight, and they need different answers for the same tool.
+#
+# The action agent's approval comes from a recorded human decision: accepting
+# a recommendation issues a grant scoped to one repository, capped at
+# repository_write, and dropped when the run ends. See modules/gateway/grants.py.
 
 version: 1
 
@@ -59,12 +61,14 @@ tools:
   codex_edit:
     side_effect: repository_write
     allowed_agents: ["assistant", "action-agent"]
-    requires_approval: false
+    # The assistant is unchanged: a user asking it to edit a file is the
+    # approval. The action agent needs an accepted recommendation behind it.
+    requires_approval: ["action-agent"]
 
   codex_refactor:
     side_effect: repository_write
     allowed_agents: ["assistant", "action-agent"]
-    requires_approval: false
+    requires_approval: ["action-agent"]
 
   # --- Google Calendar MCP -------------------------------------------------
   google_list_events:

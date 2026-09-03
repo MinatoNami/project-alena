@@ -14,8 +14,20 @@ from pathlib import Path
 from typing import List, Optional, Sequence
 
 from .artifacts import ensure_layout, intelligence_dir
+from .action.implement import implement
 from .context_package import build_context_package
-from .persistence import latest_scan
+from .decide import (
+    ABANDONED,
+    ACCEPTED,
+    RECOMMENDED,
+    REJECTED,
+    SUCCESSFUL,
+    UNSUCCESSFUL,
+    DecisionError,
+    decide,
+    history,
+)
+from .persistence import implementations_for, latest_scan, recommendations_for
 from .registry import RegistryError, Repository, load_registry
 from .research import ingest_file, research_files
 from .review_run import escalate_repository, recommend_repository, review_repository
@@ -212,6 +224,123 @@ def cmd_recommend(args: argparse.Namespace) -> int:
     return 0
 
 
+_STATUS_FLAGS = {
+    "accept": ACCEPTED,
+    "reject": REJECTED,
+    "revisit": RECOMMENDED,
+    "abandon": ABANDONED,
+    "successful": SUCCESSFUL,
+    "unsuccessful": UNSUCCESSFUL,
+}
+
+
+def cmd_decide(args: argparse.Namespace) -> int:
+    registry = load_registry(args.registry)
+    repository = registry.resolve(args.repository)
+
+    chosen = [name for name in _STATUS_FLAGS if getattr(args, name, False)]
+    if len(chosen) != 1:
+        print(
+            "error: choose exactly one of "
+            f"--{', --'.join(_STATUS_FLAGS)}",
+            file=sys.stderr,
+        )
+        return 2
+
+    try:
+        decision = decide(
+            repository.id,
+            args.id,
+            _STATUS_FLAGS[chosen[0]],
+            reason=args.reason,
+            actor=args.actor,
+            actual_effort=args.actual_effort,
+            observed_value=args.observed_value,
+            feedback=args.feedback,
+        )
+    except DecisionError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    print(decision.describe())
+    if decision.to_status == ACCEPTED:
+        print(
+            f"  implement with: alena-improve implement {repository.id} {args.id}"
+        )
+    return 0
+
+
+def cmd_pending(args: argparse.Namespace) -> int:
+    registry = load_registry(args.registry)
+    found = 0
+    for repository in _targets(registry, args.repository, args.all or not args.repository):
+        rows = recommendations_for(repository.id, args.status)
+        if not rows:
+            continue
+        print(f"{repository.name} ({repository.id})")
+        for row in rows:
+            score = f"{row['score']:.2f}" if row["score"] is not None else "?"
+            print(
+                f"  #{row['id']:<4} {score:>5}  {row['status']:<12} {row['title']}"
+            )
+            found += 1
+        print()
+    if not found:
+        print(f"Nothing with status {args.status!r}.")
+    return 0
+
+
+def cmd_implement(args: argparse.Namespace) -> int:
+    registry = load_registry(args.registry)
+    install_gateway(registry, args.policy)
+    ensure_layout()
+
+    try:
+        repository = registry.resolve(args.repository, "modify")
+    except RegistryError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    run = implement(
+        repository, args.id, run_tests_enabled=not args.no_tests
+    )
+    print(run.describe())
+    if not run.ok:
+        return 1
+
+    print(f"  branch:  {run.branch} (from {run.base_branch})")
+    print(f"  commit:  {(run.commit_sha or '')[:12]}")
+    for path in run.files_changed[:20]:
+        print(f"    {path}")
+    if run.review and run.review.body:
+        print()
+        print(f"  {run.review.agent} review ({run.review.verdict}):")
+        print("  " + run.review.body.strip().splitlines()[0][:200])
+    print()
+    print("Nothing has been pushed. Review the branch, then merge it yourself.")
+    return 0
+
+
+def cmd_show_decision(args: argparse.Namespace) -> int:
+    registry = load_registry(args.registry)
+    repository = registry.resolve(args.repository)
+
+    for row in history(args.id):
+        reason = f" — {row['reason']}" if row["reason"] else ""
+        print(
+            f"{row['created_at']}  {row['from_status']} -> {row['to_status']}"
+            f"  ({row['actor']}){reason}"
+        )
+    for row in implementations_for(args.id):
+        print(
+            f"{row['created_at']}  implementation {row['status']}"
+            f"  branch={row['branch']}  tests="
+            f"{'passed' if row['tests_passed'] else 'failed/none'}"
+            f"  review={row['review_verdict']}"
+        )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     # Config paths are accepted both before and after the subcommand: the
     # natural thing to type is `scan --all --registry x`, but the global form
@@ -311,6 +440,49 @@ def build_parser() -> argparse.ArgumentParser:
     recommend.add_argument("repository", nargs="?")
     recommend.add_argument("--all", action="store_true")
     recommend.set_defaults(func=cmd_recommend)
+
+    pending = sub.add_parser(
+        "pending", parents=[common], help="Recommendations awaiting a decision"
+    )
+    pending.add_argument("repository", nargs="?")
+    pending.add_argument("--all", action="store_true")
+    pending.add_argument("--status", default=RECOMMENDED)
+    pending.set_defaults(func=cmd_pending)
+
+    decide_cmd = sub.add_parser(
+        "decide", parents=[common], help="Record a decision on a recommendation"
+    )
+    decide_cmd.add_argument("repository")
+    decide_cmd.add_argument("id", type=int)
+    decide_cmd.add_argument("--accept", action="store_true")
+    decide_cmd.add_argument("--reject", action="store_true")
+    decide_cmd.add_argument("--revisit", action="store_true", help="Reopen a rejection")
+    decide_cmd.add_argument("--abandon", action="store_true")
+    decide_cmd.add_argument("--successful", action="store_true")
+    decide_cmd.add_argument("--unsuccessful", action="store_true")
+    decide_cmd.add_argument("--reason", help="Required when rejecting or abandoning")
+    decide_cmd.add_argument("--actor", default="human")
+    decide_cmd.add_argument("--actual-effort", choices=("SMALL", "MEDIUM", "LARGE"))
+    decide_cmd.add_argument("--observed-value", type=float)
+    decide_cmd.add_argument("--feedback")
+    decide_cmd.set_defaults(func=cmd_decide)
+
+    impl = sub.add_parser(
+        "implement",
+        parents=[common],
+        help="Implement an accepted recommendation on a branch",
+    )
+    impl.add_argument("repository")
+    impl.add_argument("id", type=int)
+    impl.add_argument("--no-tests", action="store_true", help="Skip the test run")
+    impl.set_defaults(func=cmd_implement)
+
+    trail = sub.add_parser(
+        "trail", parents=[common], help="Decision and implementation history"
+    )
+    trail.add_argument("repository")
+    trail.add_argument("id", type=int)
+    trail.set_defaults(func=cmd_show_decision)
 
     return parser
 

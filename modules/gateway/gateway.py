@@ -24,6 +24,7 @@ from modules.core.controller.logger import logger
 from .audit import AuditLog, hash_arguments
 from .catalog import CatalogEntry, ToolCatalog
 from .contracts import SideEffect
+from .grants import ActionGrant, GrantBook
 from .errors import (
     ApprovalRequired,
     GatewayDenied,
@@ -94,15 +95,22 @@ class ToolGateway:
         audit: Optional[AuditLog] = None,
         pool: Optional[MCPSessionPool] = None,
         repo_root_provider: Optional[Callable[[], List[str]]] = None,
+        grants: Optional[GrantBook] = None,
     ):
         self._catalog = catalog
         self._audit = audit if audit is not None else AuditLog()
         self._pool = pool
         self._repo_roots = repo_root_provider or allowed_repo_roots
+        self._grants = grants if grants is not None else GrantBook()
 
     @property
     def catalog(self) -> ToolCatalog:
         return self._catalog
+
+    @property
+    def grants(self) -> GrantBook:
+        """Write grants currently in force. Empty is the normal state."""
+        return self._grants
 
     @property
     def pool(self) -> MCPSessionPool:
@@ -203,15 +211,25 @@ class ToolGateway:
         except GatewayDenied as exc:
             raise deny(exc) from None
 
-        if decision.requires_approval and not (
-            approval and approval.matches(tool, args_hash, repository_id)
-        ):
-            raise deny(
-                ApprovalRequired(
-                    f"{tool} requires human approval for these exact arguments "
-                    f"(side effect: {side_effect.value if side_effect else 'unknown'})"
-                )
-            ) from None
+        granted: Optional[ActionGrant] = None
+        if decision.requires_approval:
+            approved = approval is not None and approval.matches(
+                tool, args_hash, repository_id
+            )
+            if not approved:
+                granted = self._grants.find(agent, repository_id, side_effect)
+            if not approved and granted is None:
+                raise deny(
+                    ApprovalRequired(
+                        f"{tool} requires approval from {agent} "
+                        f"(side effect: "
+                        f"{side_effect.value if side_effect else 'unknown'}). "
+                        "Accept the recommendation it implements, or supply an "
+                        "explicit approval."
+                    )
+                ) from None
+            if granted is not None:
+                logger.info(f"GATEWAY_GRANT: {tool} under {granted.describe()}")
 
         started = time.perf_counter()
         try:

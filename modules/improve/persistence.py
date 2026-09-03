@@ -549,3 +549,96 @@ def recommendations_for(
             (repository_id,),
         )
     return [dict(row) for row in rows]
+
+
+# ---------------------------------------------------------------------------
+# Implementations
+# ---------------------------------------------------------------------------
+
+
+def record_implementation(
+    *,
+    recommendation_id: int,
+    repository_id: str,
+    implemented_by: str,
+    reviewed_by: Optional[str] = None,
+    branch: Optional[str] = None,
+    base_branch: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> int:
+    """Open an implementation record before anything is written.
+
+    Before, not after: a run that dies halfway leaves a branch on disk, and the
+    row is how you find out which one.
+    """
+    conn = conn or get_connection()
+    cursor = conn.execute(
+        "INSERT INTO implementations (recommendation_id, repository_id,"
+        " created_at, implemented_by, reviewed_by, branch, base_branch, status)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, 'started')",
+        (
+            recommendation_id,
+            repository_id,
+            utcnow(),
+            implemented_by,
+            reviewed_by,
+            branch,
+            base_branch,
+        ),
+    )
+    conn.commit()
+    return int(cursor.lastrowid)
+
+
+def update_implementation(
+    implementation_id: int,
+    *,
+    status: Optional[str] = None,
+    commit_sha: Optional[str] = None,
+    files_changed: Optional[List[str]] = None,
+    tests_command: Optional[str] = None,
+    tests_passed: Optional[bool] = None,
+    tests_output: Optional[str] = None,
+    review_verdict: Optional[str] = None,
+    review_body: Optional[str] = None,
+    pushed: Optional[bool] = None,
+    pull_request_url: Optional[str] = None,
+    error: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> None:
+    conn = conn or get_connection()
+    fields = {
+        "status": status,
+        "commit_sha": commit_sha,
+        "files_changed": _json(files_changed) if files_changed is not None else None,
+        "tests_command": tests_command,
+        "tests_passed": None if tests_passed is None else int(tests_passed),
+        "tests_output": tests_output,
+        "review_verdict": review_verdict,
+        "review_body": review_body,
+        "pushed": None if pushed is None else int(pushed),
+        "pull_request_url": pull_request_url,
+        "error": error,
+    }
+    assignments = [f"{k} = ?" for k, v in fields.items() if v is not None]
+    if not assignments:
+        return
+    conn.execute(
+        f"UPDATE implementations SET {', '.join(assignments)} WHERE id = ?",
+        [v for v in fields.values() if v is not None] + [implementation_id],
+    )
+    conn.commit()
+
+
+def implementations_for(
+    recommendation_id: int, conn: Optional[sqlite3.Connection] = None
+) -> List[Dict[str, Any]]:
+    conn = conn or get_connection()
+    return [
+        dict(row)
+        for row in conn.execute(
+            "SELECT * FROM implementations WHERE recommendation_id = ?"
+            " ORDER BY id DESC",
+            (recommendation_id,),
+        )
+    ]
