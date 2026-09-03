@@ -83,12 +83,85 @@ ChatGPT Work (its own schedule)
      review  ──► Codex, read-only, through the gateway
         │
         ▼
+   review --agent claude ──► only what clears an escalation threshold
+        │
+        ▼
    recommend  ──► scored ──► recommendations/<repo>/latest.md
                                 │
                         rejected by review
                                 │
                      recorded, so it is recognised next time
 ```
+
+### Two reviewers, and when the second one is worth buying
+
+Codex reviews everything new. Claude reviews only what justifies it — the spec
+is explicit that forty observations should become ten candidates, then four,
+and only those four are worth a second frontier model.
+
+`agents/triggers.py` is that filter: a pure function over recorded facts, no
+I/O and no model call, because it is the only thing standing between a
+research feed and a subscription. Any one condition is enough:
+
+| Condition | Why |
+|---|---|
+| score ≥ 0.70 | worth getting right |
+| reviewer confidence < 0.60 | the first opinion was not a confident one |
+| changes architecture | expensive to undo |
+| security-sensitive | expensive to be wrong about |
+| effort LARGE | expensive to build |
+| reviewers already disagree | that is what a third look is for |
+
+A candidate nobody has reviewed is never escalated — that would spend the
+expensive reviewer on triage. A candidate the first reviewer *confidently*
+rejected is not escalated on score alone; rejecting what does not fit is the
+reviewer doing its job.
+
+Repository tags (`security`, `vulnerability-management`) escalate by default,
+but only when no reviewer expressed an opinion. A reviewer that looked and
+said "not security-sensitive" beats the tag — otherwise every candidate in a
+security product escalates and the cost control is gone for exactly the
+repository that generates the most of them.
+
+Every escalation records which condition fired, so the thresholds can be tuned
+against which ones turned out to be worth it:
+
+```bash
+scripts/alena_improve.sh review luma-index --agent claude --dry-run
+# luma-index: claude: 1 reviewed, 1 below the escalation threshold, 50% of 2 escalated
+#   would escalate: Local OCR for scanned PDFs — score 0.88 >= 0.70
+```
+
+`--retry-failed` re-attempts escalations whose previous review errored; without
+it a failure counts as attempted, so a broken endpoint is not retried on every
+run forever.
+
+### Containment differs between the two reviewers
+
+Codex is held by the Tool Gateway: it runs as an identity the policy grants
+read-only tools, so a hijacked review cannot write. A Claude routine runs on
+Anthropic's side and the gateway has no say there — the containment is
+narrower and worth stating plainly. ALENA sends text and parses text; the
+routine cannot reach ALENA's tools, repositories or database. What a routine
+may do in *its* environment is configured where the routine is defined.
+
+**The routine client has not been run against a live endpoint.** It speaks an
+explicit contract (POST a prompt; take an answer, or a job id to poll) and
+reads responses tolerantly. If the real envelope differs, `extract_text` in
+`agents/claude_review.py` is the single place to adjust.
+
+Which is why there is a check. After setting `CLAUDE_ROUTINE_URL`, run it
+before trusting anything else:
+
+```bash
+scripts/alena_improve.sh check-routine
+```
+
+It sends one trivial prompt that explicitly asks for no work, and separates
+three failures that look identical from the outside: the URL is not set, the
+endpoint cannot be reached, and the endpoint answered in a shape the client
+cannot read. Finding out which during a Thursday 02:00 escalation is the worst
+available time.
 
 ### Research is untrusted input
 
@@ -278,6 +351,9 @@ scripts/alena_improve.sh context luma-index                    # write .context/
 scripts/alena_improve.sh ingest-research luma-index r.md       # take a report
 scripts/alena_improve.sh ingest-research luma-index --from-dir ~/drop
 scripts/alena_improve.sh review luma-index                     # Codex, read-only
+scripts/alena_improve.sh check-routine                         # is Claude wired up?
+scripts/alena_improve.sh review luma-index --agent claude --dry-run
+scripts/alena_improve.sh review luma-index --agent claude      # second opinion
 scripts/alena_improve.sh recommend luma-index                  # score and report
 
 scripts/alena_improve.sh pending                               # awaiting a decision
