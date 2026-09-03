@@ -55,6 +55,7 @@ from modules.improve.decide import (
 from modules.improve.persistence import implementations_for, recommendations_for
 from modules.improve.registry import RegistryError, load_registry
 from modules.improve.status import summary
+from modules.improve.web.runs import COMMANDS, Busy, get_runner
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 9100
@@ -116,6 +117,10 @@ def require_dashboard(**kwargs) -> None:
 
 async def guard(x_alena_dashboard: Optional[str] = Header(default=None)) -> None:
     require_dashboard(x_alena_dashboard=x_alena_dashboard)
+
+
+class RunRequest(BaseModel):
+    command: str = Field(..., description="A key from /api/commands")
 
 
 class DecisionRequest(BaseModel):
@@ -308,6 +313,53 @@ def create_app() -> FastAPI:
                 f"{result.recommendation_id}"
             )
         return response
+
+    # -- running a step on request -----------------------------------------
+
+    @app.get("/api/commands")
+    async def get_commands() -> List[Dict[str, Any]]:
+        """What the dashboard is allowed to start, and what each one costs."""
+        return [
+            {
+                "key": c.key,
+                "label": c.label,
+                "description": c.description,
+                "costs": c.costs,
+            }
+            for c in COMMANDS.values()
+        ]
+
+    @app.get("/api/runs")
+    async def get_runs() -> Dict[str, Any]:
+        runner = get_runner()
+        return {
+            "current": runner.current.to_dict(include_output=False)
+            if runner.current
+            else None,
+            "runs": [r.to_dict(include_output=False) for r in runner.runs()],
+        }
+
+    @app.get("/api/runs/{run_id}")
+    async def get_run(run_id: str) -> Dict[str, Any]:
+        run = get_runner().get(run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail=f"No run {run_id}")
+        return run.to_dict()
+
+    @app.post("/api/runs", dependencies=[Depends(guard)])
+    async def post_run(payload: RunRequest) -> Dict[str, Any]:
+        try:
+            run = get_runner().start(payload.command)
+        except KeyError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown command {payload.command!r}. "
+                f"Expected one of: {', '.join(sorted(COMMANDS))}",
+            ) from None
+        except Busy as exc:
+            # 409, not 500: nothing is broken, the caller just has to wait.
+            raise HTTPException(status_code=409, detail=str(exc)) from None
+        return run.to_dict()
 
     @app.get("/api/portfolio")
     async def get_portfolio() -> Dict[str, Any]:

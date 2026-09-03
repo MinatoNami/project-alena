@@ -47,11 +47,36 @@ localhost service that changes state. Two things close it:
 There is no login, because there is no second user. If you ever bind this off
 loopback, that stops being true and it needs one.
 
+## Running a step
+
+The status page has a button per pipeline step: scan, review, recommend, a
+Claude escalation preview, and a portfolio refresh. Output streams back into
+the page.
+
+Each one starts a **subprocess running the same wrapper launchd runs**, so a
+button and a timer take an identical path — including the PATH fixes and the
+`.env` sourcing that only exist in that script. Nothing is reimplemented for
+the browser.
+
+**One at a time.** They share a database and the same workspaces, and two
+scans racing would interleave writes for nothing. A second request is refused
+with a 409 rather than queued: queueing would let a stray double-click spend a
+second Codex review.
+
+A `$` on a button means it spends beyond local compute. Only `review` does —
+one Codex call per new observation. A button that quietly costs quota is one
+people regret.
+
+Runs are held in memory, so a restart forgets them, and the scheduled jobs run
+the same commands without appearing in the list. It is a view of what you
+started from here, not a history of everything that ran.
+
 ## Implementing is not something a browser does
 
-There is no implement endpoint. It writes to a repository, takes minutes, and
-is the thing most worth watching while it happens. Accepting in the dashboard
-prints the command instead:
+There is no implement endpoint, and no button. It writes to a repository,
+takes minutes, and is the thing most worth watching while it happens.
+`ingest-research` is absent too — it needs a file path, and a browser should
+not be choosing one. Accepting in the dashboard prints the command instead:
 
 ```
 alena-improve implement luma-index 3

@@ -1,0 +1,221 @@
+"""Running pipeline steps in the background, on request.
+
+A scan of four repositories takes about two minutes and a Codex review takes
+the better part of a minute per observation, so none of these can be a
+synchronous request. Each one starts a subprocess and the caller polls.
+
+**A subprocess, not a thread.** It runs the same wrapper launchd runs, so a
+button and a timer take identical paths -- including the PATH fixes and the
+.env sourcing that only exist in that script. It also keeps the work off the
+API's own interpreter, which matters because the store hands out one
+connection per thread and a long job holding one is a connection nobody else
+can reuse.
+
+**One at a time.** Every command here reads and writes the same database and
+the same workspaces, and two scans racing would interleave writes for no
+benefit. A second request while one is running is refused rather than queued:
+queueing would let a stray double-click spend a second Codex review.
+
+Runs live in memory. A restart forgets them, which is the right trade for
+something whose durable output is already in the database -- and the launchd
+jobs run the same commands without appearing here at all, so this was never
+a complete history of anything.
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import threading
+import uuid
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+WRAPPER = REPO_ROOT / "scripts" / "alena_improve.sh"
+
+MAX_OUTPUT_LINES = 500
+KEEP_RUNS = 20
+
+
+@dataclass(frozen=True)
+class Command:
+    """A pipeline step the dashboard is allowed to start."""
+
+    key: str
+    label: str
+    args: List[str]
+    description: str
+    # Whether it spends anything beyond local compute. Shown in the UI: a
+    # button that quietly costs Codex quota is a button people regret.
+    costs: Optional[str] = None
+
+
+COMMANDS: Dict[str, Command] = {
+    c.key: c
+    for c in [
+        Command(
+            "scan",
+            "Scan repositories",
+            ["scan", "--all"],
+            "Refresh git state, dependencies and TODOs. Unchanged repositories "
+            "are skipped without reaching the model.",
+        ),
+        Command(
+            "review",
+            "Review new observations",
+            ["review", "--all"],
+            "Put each new research observation to Codex.",
+            costs="one Codex call per new observation",
+        ),
+        Command(
+            "recommend",
+            "Score and write reports",
+            ["recommend", "--all"],
+            "Score everything reviewed and rewrite the recommendation reports.",
+        ),
+        Command(
+            "escalate-dry-run",
+            "Preview Claude escalation",
+            ["review", "--all", "--agent", "claude", "--dry-run"],
+            "Show which candidates would go to Claude, and why. Calls nothing.",
+        ),
+        Command(
+            "portfolio",
+            "Refresh portfolio",
+            ["portfolio"],
+            "Recompute shared technology and divergent pins across repositories.",
+        ),
+    ]
+}
+
+# Deliberately absent: `implement`. It writes to a repository, and it is the
+# thing most worth watching while it happens. `ingest-research` is absent too
+# -- it needs a file path, and a browser should not be choosing one.
+
+
+@dataclass
+class Run:
+    id: str
+    command: str
+    label: str
+    started_at: str
+    state: str = "running"  # running | finished | failed
+    exit_code: Optional[int] = None
+    finished_at: Optional[str] = None
+    output: List[str] = field(default_factory=list)
+
+    def to_dict(self, include_output: bool = True) -> Dict[str, Any]:
+        payload = {
+            "id": self.id,
+            "command": self.command,
+            "label": self.label,
+            "state": self.state,
+            "exit_code": self.exit_code,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+        }
+        if include_output:
+            payload["output"] = self.output
+        return payload
+
+
+class Busy(RuntimeError):
+    """Something is already running."""
+
+
+class Runner:
+    def __init__(self, wrapper: Optional[Path] = None):
+        self._wrapper = wrapper or WRAPPER
+        self._runs: List[Run] = []
+        self._current: Optional[Run] = None
+        self._lock = threading.Lock()
+
+    @property
+    def current(self) -> Optional[Run]:
+        return self._current
+
+    def runs(self) -> List[Run]:
+        return list(reversed(self._runs))
+
+    def get(self, run_id: str) -> Optional[Run]:
+        return next((r for r in self._runs if r.id == run_id), None)
+
+    def start(self, key: str) -> Run:
+        command = COMMANDS.get(key)
+        if command is None:
+            raise KeyError(key)
+
+        with self._lock:
+            if self._current is not None and self._current.state == "running":
+                raise Busy(
+                    f"{self._current.label} is already running. These share a "
+                    "database and the same workspaces, so they run one at a time."
+                )
+            run = Run(
+                id=uuid.uuid4().hex[:12],
+                command=key,
+                label=command.label,
+                started_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            )
+            self._current = run
+            self._runs.append(run)
+            del self._runs[:-KEEP_RUNS]
+
+        threading.Thread(
+            target=self._execute, args=(run, command), daemon=True,
+            name=f"alena-run:{key}",
+        ).start()
+        return run
+
+    def _execute(self, run: Run, command: Command) -> None:
+        try:
+            process = subprocess.Popen(
+                [str(self._wrapper), *command.args],
+                cwd=str(REPO_ROOT),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                env={**os.environ},
+            )
+        except OSError as exc:
+            run.output.append(f"could not start: {exc}")
+            run.state = "failed"
+            run.exit_code = -1
+            run.finished_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            self._release(run)
+            return
+
+        assert process.stdout is not None
+        for line in process.stdout:
+            run.output.append(line.rstrip())
+            # Bounded: a scan of a large portfolio is chatty, and this is held
+            # in memory for a page that only shows the tail anyway.
+            del run.output[:-MAX_OUTPUT_LINES]
+
+        run.exit_code = process.wait()
+        run.state = "finished" if run.exit_code == 0 else "failed"
+        run.finished_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        self._release(run)
+
+    def _release(self, run: Run) -> None:
+        with self._lock:
+            if self._current is run:
+                self._current = None
+
+
+_runner: Optional[Runner] = None
+
+
+def get_runner() -> Runner:
+    global _runner
+    if _runner is None:
+        _runner = Runner()
+    return _runner
+
+
+def reset_runner() -> None:
+    global _runner
+    _runner = None

@@ -84,6 +84,10 @@ onMounted(() => {
         <p class="mt-2 font-mono text-xs">alena-improve review --all --retry-failed</p>
       </section>
 
+      <div class="mb-8 border-t border-neutral-200 pt-6 dark:border-neutral-800">
+        <RunPanel @finished="refresh" />
+      </div>
+
       <p v-if="data.waiting_on_you" class="text-sm">
         <NuxtLink to="/queue" class="font-medium underline">
           {{ data.waiting_on_you }} recommendation(s) need a decision
