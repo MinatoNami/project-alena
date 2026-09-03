@@ -108,9 +108,8 @@ It combines **on-device LLMs**, **speech-to-text**, and **extensible MCP (Model 
 - Python 3.10+
 - **LM Studio**, with a model loaded and its server started (default port 1234)
 - **[text-whisperer](https://github.com/MinatoNami/text-whisperer)** reachable
-  over the tailnet, for voice. See
-  [Documents/TEXT_WHISPERER_CONTRACT.md](Documents/TEXT_WHISPERER_CONTRACT.md) —
-  it needs a transcription endpoint added before voice works.
+  over the tailnet, for voice — running a build that has `POST /api/transcribe`.
+  See [Documents/TEXT_WHISPERER_CONTRACT.md](Documents/TEXT_WHISPERER_CONTRACT.md).
 - **Codex CLI** (used by the MCP Codex server). If you have access via your plan (e.g., ChatGPT Plus), install the Codex CLI and make sure it’s available in your `$PATH`.
 
 Notes:
@@ -123,7 +122,7 @@ Notes:
 ## 🧭 Project Status
 
 - ✅ Local LLM inference (LM Studio, native tool calling)
-- ✅ Remote STT via text-whisperer (pending its `/api/transcribe` endpoint)
+- ✅ Remote STT via text-whisperer over the tailnet
 - ✅ Web voice interface MVP (web app usable; supports voice memos via Telegram)
 - ✅ Telegram integration (text + voice memos → controller)
 - ✅ Codex MCP server integration (tool executor wired)

@@ -4,12 +4,11 @@ ALENA no longer runs Whisper. It sends audio to
 [text-whisperer](https://github.com/MinatoNami/text-whisperer) over the tailnet
 and gets a transcript back.
 
-**This endpoint does not exist yet.** ALENA's client
-([`modules/stt/text_whisperer.py`](../modules/stt/text_whisperer.py)) is written
-against the contract below; the matching route has to be added to
-text-whisperer's `src/telegram_stt/web.py` before voice input works. Until then
-the Telegram bot and the voice backend both report STT as unavailable and keep
-serving text.
+The client lives in
+[`modules/stt/text_whisperer.py`](../modules/stt/text_whisperer.py); the
+endpoint is implemented in text-whisperer's `src/telegram_stt/web.py`
+(`_do_transcribe`) with upload parsing in its `multipart.py`. This file is the
+contract both sides are written against — change it when they change.
 
 ---
 
@@ -77,56 +76,32 @@ handler is a `dataclasses.asdict` away from done.
 
 ---
 
-## Sketch for `web.py`
+## How the server side behaves
 
-The existing `Gate` covers cookie logins for the browser. A machine client
-wants a header instead, so authorise on either.
+Both questions this document originally left open have been decided:
 
-```python
-def _bearer_ok(self) -> bool:
-    token = self.gate.password          # reuse WEB_PASSWORD as the shared secret
-    if not token:
-        return True                     # no gate configured; loopback/tailnet only
-    header = self.headers.get("Authorization", "")
-    return header.startswith("Bearer ") and compare_digest(header[7:], token)
+**It takes the Telegram worker's GPU lock.** Transcription is deliberately one
+thread there, because the GPU is one resource. `Bot.transcribe_file` acquires
+the same `_gpu_lock` that `Bot._process` now holds, so an upload waits rather
+than halving the speed of a meeting already running. If it cannot get the GPU
+within 30 seconds it returns `503` — better than a socket that dies waiting.
+
+**Uploads are not archived.** The archive is a record of meetings; a
+five-second "what's on my calendar" is noise in it. The spooled file is deleted
+once the transcript is returned.
+
+Authentication is `WEB_PASSWORD` presented as a bearer token, compared in
+constant time by the same `auth.check_password` the browser login uses. It
+works on every API route, which is what lets ALENA's health check call
+`/api/status` with the same header.
+
+Testing it by hand:
+
+```bash
+curl -s -X POST http://127.0.0.1:8090/api/transcribe \
+  -H "Authorization: Bearer $WEB_PASSWORD" \
+  -F audio=@memo.m4a -F language=en | jq .text
 ```
-
-Then in `do_POST`, before the cookie check:
-
-```python
-if route == "/api/transcribe":
-    if not self._bearer_ok():
-        return self._fail(HTTPStatus.UNAUTHORIZED, "bad token")
-
-    # Spool to a temp file: transcribe() takes a Path, and a long recording
-    # should not be held in memory twice.
-    with tempfile.NamedTemporaryFile(suffix=".bin", delete=False) as tmp:
-        tmp.write(self._multipart_field("audio"))
-        path = Path(tmp.name)
-    try:
-        result = transcribe(
-            path,
-            model=self.bot.config.whisper_model,
-            language=... or self.bot.config.whisper_language,
-            initial_prompt=self.bot.config.whisper_initial_prompt,
-            max_seconds=self.bot.config.max_audio_seconds,
-        )
-        return self._json(dataclasses.asdict(result))
-    except TranscriptionError as exc:
-        return self._fail(HTTPStatus.BAD_REQUEST, str(exc))
-    finally:
-        path.unlink(missing_ok=True)
-```
-
-Two things worth deciding over there rather than here:
-
-1. **Serialise against the worker.** Transcription is deliberately one thread,
-   because the GPU is one resource. This route should take the same lock the
-   Telegram worker uses, or a long meeting arriving by Telegram and a voice
-   memo arriving from ALENA will halve each other's speed.
-2. **Whether these land in the archive.** A two-second "what's on my calendar"
-   is noise in a list of meetings. Skipping `archive.store()` for this route is
-   probably right; that is a product call.
 
 ---
 

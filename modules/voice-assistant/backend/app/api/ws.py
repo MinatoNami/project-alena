@@ -46,6 +46,14 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 logger.info("WebSocket disconnected")
                 return
 
+            # Starlette delivers a close as a message, not an exception. It
+            # carries neither "bytes" nor "text", so without this the loop
+            # falls through and calls receive() again -- which raises, and
+            # logged a traceback on every normal disconnect.
+            if message.get("type") == "websocket.disconnect":
+                logger.info("WebSocket disconnected")
+                return
+
             if "bytes" in message and message["bytes"] is not None:
                 chunk: bytes = message["bytes"]
                 audio_buffer.extend(chunk)
