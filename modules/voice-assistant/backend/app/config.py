@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from pathlib import Path
 from typing import List
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
-ROOT_DIR = Path(__file__).resolve().parents[4]
+# Resolved by walking up for modules/, so it is right both in a checkout and
+# in the container, where the app sits at a different depth.
+from app import ROOT_DIR
 
 
 class Settings(BaseSettings):
