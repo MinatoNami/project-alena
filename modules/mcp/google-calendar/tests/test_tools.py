@@ -20,7 +20,7 @@ class TestListEventsTool:
         with patch("tools.calendar_client", None):
             import tools
 
-            result = tools.list_events()
+            result = tools.google_list_events()
             assert "Error: Calendar client not initialized" in result
 
     def test_list_events_success(self):
@@ -41,7 +41,7 @@ class TestListEventsTool:
         with patch("tools.calendar_client", mock_client):
             import tools
 
-            result = tools.list_events()
+            result = tools.google_list_events()
 
             assert "Events found:" in result
             assert "Team Meeting" in result
@@ -55,7 +55,7 @@ class TestListEventsTool:
         with patch("tools.calendar_client", mock_client):
             import tools
 
-            result = tools.list_events()
+            result = tools.google_list_events()
 
             assert "No events found" in result
 
@@ -67,7 +67,7 @@ class TestListEventsTool:
         with patch("tools.calendar_client", mock_client):
             import tools
 
-            tools.list_events(
+            tools.google_list_events(
                 calendar_id="secondary@example.com",
                 start_date="2025-01-20",
                 end_date="2025-01-27",
@@ -89,7 +89,7 @@ class TestListEventsTool:
         with patch("tools.calendar_client", mock_client):
             import tools
 
-            result = tools.list_events()
+            result = tools.google_list_events()
 
             assert "Error:" in result
 
@@ -101,7 +101,7 @@ class TestListEventsTool:
         with patch("tools.calendar_client", mock_client):
             import tools
 
-            result = tools.list_events()
+            result = tools.google_list_events()
 
             assert "Error listing events:" in result
 
@@ -132,7 +132,7 @@ class TestListEventsTool:
         with patch("tools.calendar_client", mock_client):
             import tools
 
-            result = tools.list_events()
+            result = tools.google_list_events()
 
             assert "Meeting 1" in result
             assert "Meeting 2" in result
@@ -148,7 +148,7 @@ class TestCreateEventTool:
         with patch("tools.calendar_client", None):
             import tools
 
-            result = tools.create_event(
+            result = tools.google_create_event(
                 title="Test",
                 start_time="2025-01-20T14:00:00",
                 end_time="2025-01-20T15:00:00",
@@ -171,7 +171,7 @@ class TestCreateEventTool:
         with patch("tools.calendar_client", mock_client):
             import tools
 
-            result = tools.create_event(
+            result = tools.google_create_event(
                 title="New Meeting",
                 start_time="2025-01-20T14:00:00",
                 end_time="2025-01-20T15:00:00",
@@ -201,7 +201,7 @@ class TestCreateEventTool:
         with patch("tools.calendar_client", mock_client):
             import tools
 
-            result = tools.create_event(
+            result = tools.google_create_event(
                 title="Team Meeting",
                 start_time="2025-01-20T14:00:00",
                 end_time="2025-01-20T15:00:00",
@@ -221,7 +221,7 @@ class TestCreateEventTool:
         with patch("tools.calendar_client", mock_client):
             import tools
 
-            result = tools.create_event(
+            result = tools.google_create_event(
                 title="Bad Event", start_time="invalid", end_time="invalid"
             )
 
@@ -235,7 +235,7 @@ class TestCreateEventTool:
         with patch("tools.calendar_client", mock_client):
             import tools
 
-            result = tools.create_event(
+            result = tools.google_create_event(
                 title="Test",
                 start_time="2025-01-20T14:00:00",
                 end_time="2025-01-20T15:00:00",
@@ -252,7 +252,7 @@ class TestUpdateEventTool:
         with patch("tools.calendar_client", None):
             import tools
 
-            result = tools.update_event(event_id="event123")
+            result = tools.google_update_event(event_id="event123")
             assert "Error: Calendar client not initialized" in result
 
     def test_update_event_success(self):
@@ -271,7 +271,7 @@ class TestUpdateEventTool:
         with patch("tools.calendar_client", mock_client):
             import tools
 
-            result = tools.update_event(
+            result = tools.google_update_event(
                 event_id="event123",
                 title="Updated Meeting",
                 description="Updated description",
@@ -296,7 +296,7 @@ class TestUpdateEventTool:
         with patch("tools.calendar_client", mock_client):
             import tools
 
-            tools.update_event(event_id="event123", title="New Title")
+            tools.google_update_event(event_id="event123", title="New Title")
 
             mock_client.update_event.assert_called_once()
             call_kwargs = mock_client.update_event.call_args[1]
@@ -311,7 +311,7 @@ class TestUpdateEventTool:
         with patch("tools.calendar_client", mock_client):
             import tools
 
-            result = tools.update_event(event_id="nonexistent", title="Updated")
+            result = tools.google_update_event(event_id="nonexistent", title="Updated")
 
             assert "Error:" in result
 
@@ -323,7 +323,7 @@ class TestUpdateEventTool:
         with patch("tools.calendar_client", mock_client):
             import tools
 
-            result = tools.update_event(event_id="event123")
+            result = tools.google_update_event(event_id="event123")
 
             assert "Error updating event:" in result
 
@@ -336,7 +336,7 @@ class TestDeleteEventTool:
         with patch("tools.calendar_client", None):
             import tools
 
-            result = tools.delete_event(event_id="event123")
+            result = tools.google_delete_event(event_id="event123")
             assert "Error: Calendar client not initialized" in result
 
     def test_delete_event_success(self):
@@ -349,7 +349,7 @@ class TestDeleteEventTool:
         with patch("tools.calendar_client", mock_client):
             import tools
 
-            result = tools.delete_event(event_id="event123")
+            result = tools.google_delete_event(event_id="event123")
 
             assert "✅" in result
             assert "deleted successfully" in result
@@ -364,7 +364,7 @@ class TestDeleteEventTool:
         with patch("tools.calendar_client", mock_client):
             import tools
 
-            tools.delete_event(event_id="event123", calendar_id="secondary@example.com")
+            tools.google_delete_event(event_id="event123", calendar_id="secondary@example.com")
 
             mock_client.delete_event.assert_called_once()
             call_kwargs = mock_client.delete_event.call_args[1]
@@ -378,7 +378,7 @@ class TestDeleteEventTool:
         with patch("tools.calendar_client", mock_client):
             import tools
 
-            result = tools.delete_event(event_id="nonexistent")
+            result = tools.google_delete_event(event_id="nonexistent")
 
             assert "Error:" in result
 
@@ -390,6 +390,6 @@ class TestDeleteEventTool:
         with patch("tools.calendar_client", mock_client):
             import tools
 
-            result = tools.delete_event(event_id="event123")
+            result = tools.google_delete_event(event_id="event123")
 
             assert "Error deleting event:" in result

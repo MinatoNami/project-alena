@@ -24,7 +24,7 @@ The tool system has been refactored to use a **centralized, single-source-of-tru
    - Imports and uses definitions from `tool_definitions.py`
    - Used by safety checks to verify tool permissions
 
-4. **`ollama_client.py`** - Auto-generated system prompt
+4. **`llm_client.py`** - Auto-generated system prompt and tool schemas
    - Imports tool descriptions from `tool_definitions.py`
    - System prompt is dynamically generated with current tools
 

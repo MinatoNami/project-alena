@@ -6,64 +6,64 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.config import get_settings
-from modules.ollama import OllamaAsyncClient, OllamaConfig
+from modules.llm import LLMAsyncClient, LLMConfig, LLMUnavailable
 
 router = APIRouter()
 
 
-def _build_client() -> OllamaAsyncClient:
+def _build_client() -> LLMAsyncClient:
     settings = get_settings()
-    if not settings.ollama_enabled:
-        raise HTTPException(status_code=503, detail="Ollama is disabled")
-    config = OllamaConfig(
-        base_url=settings.ollama_base_url,
-        model=settings.ollama_model,
-        timeout_s=settings.ollama_timeout,
+    if not settings.llm_enabled:
+        raise HTTPException(status_code=503, detail="LLM is disabled")
+    config = LLMConfig(
+        base_url=settings.llm_base_url,
+        model=settings.llm_model,
+        timeout_s=settings.llm_timeout,
     )
-    return OllamaAsyncClient(config)
+    return LLMAsyncClient(config)
 
 
-@router.post("/api/chat")
-async def chat_proxy(request: Request):
+@router.get("/v1/models")
+async def list_models():
+    client = _build_client()
+    try:
+        return JSONResponse(content=await client.list_models())
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"LM Studio unreachable: {exc}")
+
+
+@router.post("/v1/chat/completions")
+async def chat_completions(request: Request):
+    """Proxy the browser's chat to LM Studio.
+
+    The browser cannot reach LM Studio directly — it is on another host behind
+    the tailnet, and a page served over HTTPS may not call it over plain HTTP.
+    Streaming replies are server-sent events, so the body is forwarded through
+    unchanged rather than re-encoded.
+    """
     payload = await request.json()
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
 
-    settings = get_settings()
-    payload["model"] = settings.ollama_model
-
     client = _build_client()
+
+    # The caller does not get to pick the model: LM Studio serves whatever is
+    # loaded, and a stale name from a cached page would 404 the whole request.
+    try:
+        payload["model"] = await client.resolve_model()
+    except LLMUnavailable as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
 
     if payload.get("stream") is True:
 
         async def _stream() -> AsyncGenerator[str, None]:
-            async for line in client.stream_lines("/api/chat", payload):
-                yield f"{line}\n"
+            async for line in client.stream_chat_raw(payload):
+                yield f"{line}\n\n"
 
-        return StreamingResponse(_stream(), media_type="application/x-ndjson")
+        return StreamingResponse(
+            _stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
-    data = await client.post_json("/api/chat", payload)
-    return JSONResponse(content=data)
-
-
-@router.post("/api/generate")
-async def generate_proxy(request: Request):
-    payload = await request.json()
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=400, detail="Invalid JSON payload")
-
-    settings = get_settings()
-    payload["model"] = settings.ollama_model
-
-    client = _build_client()
-
-    if payload.get("stream") is True:
-
-        async def _stream() -> AsyncGenerator[str, None]:
-            async for line in client.stream_lines("/api/generate", payload):
-                yield f"{line}\n"
-
-        return StreamingResponse(_stream(), media_type="application/x-ndjson")
-
-    data = await client.post_json("/api/generate", payload)
-    return JSONResponse(content=data)
+    return JSONResponse(content=await client.post_chat(payload))

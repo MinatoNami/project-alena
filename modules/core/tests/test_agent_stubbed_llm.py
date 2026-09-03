@@ -14,7 +14,7 @@ async def test_agent_parses_json_tool_call(monkeypatch):
     })
 
     monkeypatch.setattr(
-        "modules.core.controller.agent.ask_ollama",
+        "modules.core.controller.agent.ask_llm",
         lambda _: fake_response
     )
 

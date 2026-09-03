@@ -1,6 +1,12 @@
 # Voice Assistant Backend
 
-FastAPI WebSocket backend for audio → Whisper (STT) → Ollama (LLM).
+FastAPI WebSocket backend for audio → text-whisperer (STT) → LM Studio or the
+ALENA controller.
+
+No model runs in this process. Audio is forwarded to
+[text-whisperer](https://github.com/MinatoNami/text-whisperer) over the tailnet,
+which is why there is no CUDA, PyTorch, numpy, scipy or librosa here any more.
+See [../../../Documents/TEXT_WHISPERER_CONTRACT.md](../../../Documents/TEXT_WHISPERER_CONTRACT.md).
 
 ## Structure
 
@@ -11,30 +17,30 @@ Matches the requested layout under `backend/app/`.
 From `modules/voice-assistant/backend`:
 
 ```bash
+./scripts/start_server.sh
+```
+
+That creates the venv, installs dependencies, puts the repo root on
+`PYTHONPATH` (the app imports `modules/llm` and `modules/stt` from there) and
+starts uvicorn — with TLS if `certs/` holds a cert, without it otherwise.
+
+By hand:
+
+```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-
-# install ONE of these STT backends:
-# pip install faster-whisper
-# or
-# pip install openai-whisper
-
-uvicorn app.main:app --reload --port 8000
-```
-
-Or use the helper script:
-
-```bash
-chmod +x start_server.sh
-./start_server.sh
+PYTHONPATH=../../.. uvicorn app.main:app --reload --port 8001
 ```
 
 Configuration is read from the repo root `.env` (see `.env.example`).
 
 Health check:
 
-- `GET http://localhost:8000/health`
+- `GET http://localhost:8001/health`
+
+It reports the configured text-whisperer URL and whether it currently answers,
+which is the first thing to check when voice input goes quiet.
 
 ## SSL (local development)
 
@@ -111,14 +117,22 @@ Server responses (JSON):
 
 ## Environment variables
 
-- `LOG_LEVEL` (default `DEBUG`)
+- `LOG_LEVEL` (default `INFO`)
 - `MAX_AUDIO_BYTES` (default `25000000`)
-- `WHISPER_MODEL` (default `small`)
-- `WHISPER_DEVICE` (default `cpu`)
-- `WHISPER_COMPUTE_TYPE` (default `int8`)
-- `OLLAMA_ENABLED` (default `true`)
-- `OLLAMA_BASE_URL` (default `http://localhost:11434`)
-- `OLLAMA_MODEL` (default `llama3.1`)
-- `LLM_ROUTE` (default `ollama`)
+- `TEXT_WHISPERER_URL` (default `http://macbook-pro-14-m4-pro:8090`)
+- `TEXT_WHISPERER_TOKEN` (text-whisperer's `WEB_PASSWORD`)
+- `TEXT_WHISPERER_TIMEOUT` (default `300`)
+- `TEXT_WHISPERER_LANGUAGE` (blank = auto-detect)
+- `LLM_ENABLED` (default `true`)
+- `LLM_BASE_URL` (default `http://localhost:1234`)
+- `LLM_MODEL` (blank = whichever model LM Studio has loaded)
+- `LLM_ROUTE` (default `alena`; `lmstudio` bypasses the controller and its tools)
 - `ALENA_CONTROLLER_URL` (default `http://localhost:9000`)
 - `ALENA_CONTROLLER_TIMEOUT` (default `120`)
+
+## HTTP endpoints
+
+Both proxy LM Studio so the browser never has to reach it directly:
+
+- `GET /v1/models`
+- `POST /v1/chat/completions` (server-sent events when `stream` is true)

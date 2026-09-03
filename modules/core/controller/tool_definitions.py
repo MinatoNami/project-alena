@@ -19,6 +19,19 @@ class ToolCapability(Enum):
     READ_FILES = "read_files"
 
 
+# Our arg_type strings, mapped to the JSON Schema types an OpenAI-compatible
+# server expects in a tool definition.
+_JSON_SCHEMA_TYPES = {
+    "string": {"type": "string"},
+    "int": {"type": "integer"},
+    "integer": {"type": "integer"},
+    "float": {"type": "number"},
+    "bool": {"type": "boolean"},
+    "boolean": {"type": "boolean"},
+    "List[string]": {"type": "array", "items": {"type": "string"}},
+}
+
+
 @dataclass
 class ToolArgument:
     """Tool argument definition"""
@@ -27,6 +40,14 @@ class ToolArgument:
     arg_type: str
     required: bool = True
     description: str = ""
+
+    def to_json_schema(self) -> Dict[str, Any]:
+        # An unmapped type falls back to string rather than emitting an invalid
+        # schema, which LM Studio would reject for the whole request.
+        schema = dict(_JSON_SCHEMA_TYPES.get(self.arg_type, {"type": "string"}))
+        if self.description:
+            schema["description"] = self.description
+        return schema
 
 
 @dataclass
@@ -60,6 +81,23 @@ class ToolDefinition:
         for arg in self.optional_args:
             args.append(f"{arg.name}?: {arg.arg_type}")
         return f"- {self.name}({', '.join(args)})"
+
+    def to_openai_tool(self) -> Dict[str, Any]:
+        """Render as an OpenAI-style function tool for LM Studio."""
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        arg.name: arg.to_json_schema() for arg in self.get_all_args()
+                    },
+                    "required": self.get_required_arg_names(),
+                },
+            },
+        }
 
 
 # ============================================================================
@@ -302,6 +340,11 @@ def get_tools_by_server(server: str) -> List[ToolDefinition]:
 def get_all_tool_names() -> List[str]:
     """Get list of all tool names"""
     return [tool.name for tool in TOOL_DEFINITIONS]
+
+
+def generate_openai_tools() -> List[Dict[str, Any]]:
+    """Every tool, as the `tools` array of a chat-completions request."""
+    return [tool.to_openai_tool() for tool in TOOL_DEFINITIONS]
 
 
 def generate_system_prompt_tools_section() -> str:

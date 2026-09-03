@@ -10,15 +10,15 @@ It combines **on-device LLMs**, **speech-to-text**, and **extensible MCP (Model 
 
 - 🧠 **Local LLM Inference**
 
-  - Runs fully on-device (e.g. via Ollama)
-  - GPU-accelerated where available
-  - No mandatory cloud dependency
+  - LM Studio over its OpenAI-compatible API
+  - Native tool calling, so the planner is not asked to hand-write JSON
+  - Runs on this machine or another one on the tailnet
 
 - 🎙️ **Speech-to-Text Interface**
 
-  - Whisper-based transcription
-  - WebSocket / WebRTC-ready architecture
-  - Push-to-talk friendly
+  - Transcription by [text-whisperer](https://github.com/MinatoNami/text-whisperer)
+    over the tailnet — no model, GPU or audio stack in this repo
+  - WebSocket push-to-talk in the browser; voice memos over Telegram
 
 - 🧩 **MCP-Based Tooling**
 
@@ -40,7 +40,7 @@ It combines **on-device LLMs**, **speech-to-text**, and **extensible MCP (Model 
 
 - 🤖 **Telegram Bot Gateway**
   - Bi-directional chat relay to groups
-  - Voice messages → Whisper → controller response
+  - Voice memos → text-whisperer → controller response
   - Optional reply in source chat or private DM
 
 ---
@@ -54,32 +54,32 @@ It combines **on-device LLMs**, **speech-to-text**, and **extensible MCP (Model 
     [ Core Agent Loop ] ───────────────┐
           │                             │
           ▼                             ▼
- [ Local LLM (Ollama) ]        [ Tool Executor ]
+ [ LM Studio (OpenAI API) ]    [ Tool Executor ]
                                       │
-                                      ▼
-                              [ MCP Codex Server ]
-                                      │
-                                      ▼
-                                 [ Codex CLI ]
-                                      │
-                                      ▼
-                               [ Repo / Files ]
+                        ┌─────────────┴─────────────┐
+                        ▼                           ▼
+               [ MCP Codex Server ]      [ MCP Google Calendar ]
+                        │
+                        ▼
+                  [ Codex CLI ]
+                        │
+                        ▼
+                 [ Repo / Files ]
 
 [ Web / Mobile UI ] ──WS──> [ Voice Assistant Backend ]
                                │
-                               ▼
-                       [ Whisper STT ]
-                               │
-                               ▼
-                        [ LLM Router ]
-                          │       │
-                          │       └──> [ ALENA Controller (FastAPI) ] ──> [ Core Agent Loop ]
-                          └───────────> [ Local LLM (Ollama) ]
+              ┌────────────────┴────────────────┐
+              ▼                                 ▼
+   [ text-whisperer (tailnet) ]          [ LLM Router ]
+      MLX Whisper on Apple GPU             │        │
+                                           │        └──> [ LM Studio ]
+                                           └──> [ ALENA Controller ] ──> [ Core Agent Loop ]
 
-[ Telegram Bot ] ───────────────> [ ALENA Controller (FastAPI) ]
+[ Telegram Bot ] ──voice──> [ text-whisperer (tailnet) ]
       │
-      └── voice ──WS──> [ Remote Whisper STT ]
+      └──text──> [ ALENA Controller (FastAPI) ]
 ```
+
 
 ---
 
@@ -96,8 +96,8 @@ It combines **on-device LLMs**, **speech-to-text**, and **extensible MCP (Model 
 
 ## 🛠️ Tech Stack
 
-- **LLM Runtime:** Ollama (local)
-- **Speech-to-Text:** Whisper
+- **LLM Runtime:** LM Studio (OpenAI-compatible API)
+- **Speech-to-Text:** text-whisperer (MLX Whisper, remote over Tailscale)
 - **Frontend:** Vue / Nuxt 4 + Tailwind v4 (@tailwindcss/vite) + @nuxt/ui
 - **Backend:** Python / Node.js (modular)
 - **Protocols:** MCP, WebSocket, WebRTC
@@ -106,7 +106,11 @@ It combines **on-device LLMs**, **speech-to-text**, and **extensible MCP (Model 
 ## ✅ Requirements
 
 - Python 3.10+
-- Ollama (for local LLM runtime)
+- **LM Studio**, with a model loaded and its server started (default port 1234)
+- **[text-whisperer](https://github.com/MinatoNami/text-whisperer)** reachable
+  over the tailnet, for voice. See
+  [Documents/TEXT_WHISPERER_CONTRACT.md](Documents/TEXT_WHISPERER_CONTRACT.md) —
+  it needs a transcription endpoint added before voice works.
 - **Codex CLI** (used by the MCP Codex server). If you have access via your plan (e.g., ChatGPT Plus), install the Codex CLI and make sure it’s available in your `$PATH`.
 
 Notes:
@@ -118,8 +122,8 @@ Notes:
 
 ## 🧭 Project Status
 
-- ✅ Local LLM inference
-- ✅ Whisper STT integration
+- ✅ Local LLM inference (LM Studio, native tool calling)
+- ✅ Remote STT via text-whisperer (pending its `/api/transcribe` endpoint)
 - ✅ Web voice interface MVP (web app usable; supports voice memos via Telegram)
 - ✅ Telegram integration (text + voice memos → controller)
 - ✅ Codex MCP server integration (tool executor wired)
@@ -134,14 +138,14 @@ From repo root:
 
 ```bash
 pip install -r requirements.txt
-bash scripts/start_alena_with_mcp.sh
+bash scripts/start_alena_with_all_mcps.sh
 ```
 
 Environment variables:
 
-- `OLLAMA_BASE_URL` (default `http://localhost:11434`)
-- `OLLAMA_MODEL` (default `gpt-oss:20b`)
-- `OLLAMA_TIMEOUT` (default `120`)
+- `LLM_BASE_URL` (default `http://localhost:1234`)
+- `LLM_MODEL` (default: whichever model LM Studio has loaded)
+- `LLM_TIMEOUT` (default `120`)
 
 All services read from the repo root `.env` (see `.env.example`).
 
@@ -158,9 +162,9 @@ bash scripts/start_controller_with_mcp.sh
 Environment variables:
 
 - `ALENA_CONTROLLER_URL` (default `http://localhost:9000`)
-- `OLLAMA_BASE_URL` (default `http://localhost:11434`)
-- `OLLAMA_MODEL` (default `gpt-oss:20b`)
-- `OLLAMA_TIMEOUT` (default `120`)
+- `LLM_BASE_URL` (default `http://localhost:1234`)
+- `LLM_MODEL` (default: whichever model LM Studio has loaded)
+- `LLM_TIMEOUT` (default `120`)
 
 All services read from the repo root `.env` (see `.env.example`).
 
@@ -168,21 +172,22 @@ All services read from the repo root `.env` (see `.env.example`).
 
 ## Run (Voice Assistant backend)
 
-From `modules/voice-assistant/backend` (PowerShell, with SSL):
-
-```powershell
-python -m uvicorn app.main:app `
-  --host localhost `
-  --port 8000 `
-  --ssl-certfile certs/server.pem `
-  --ssl-keyfile certs/server-key.pem
+```bash
+bash modules/voice-assistant/backend/scripts/start_server.sh
 ```
+
+The backend imports `modules/llm` and `modules/stt` from the repo root, so run
+it through that script or set `PYTHONPATH` to the repo root yourself.
 
 Key environment variables:
 
-- `LLM_ROUTE` (`ollama` or `alena`)
+- `LLM_ROUTE` (`alena` for tool-capable answers, `lmstudio` for raw model output)
 - `ALENA_CONTROLLER_URL` (used when `LLM_ROUTE=alena`)
-- `OLLAMA_BASE_URL` (used when `LLM_ROUTE=ollama`)
+- `LLM_BASE_URL` (used when `LLM_ROUTE=lmstudio`, and for the web UI proxy)
+- `TEXT_WHISPERER_URL` / `TEXT_WHISPERER_TOKEN` (transcription)
+
+`GET /health` reports whether text-whisperer is actually reachable, which is
+the first thing to check when voice goes quiet.
 
 ---
 
@@ -218,8 +223,9 @@ Optional:
 - `TELEGRAM_SOURCE_CHAT_IDS` (restrict listening)
 - `TELEGRAM_ECHO_IN_TARGET` (allow echo in target)
 - `TELEGRAM_REPLY_IN_SOURCE` (reply in source chat)
-- `TELEGRAM_STT_WS_URL` (remote Whisper WebSocket)
-- `TELEGRAM_STT_SSL_VERIFY` (set `false` for self-signed certs)
+- `TEXT_WHISPERER_URL` (transcription for voice memos)
+- `TEXT_WHISPERER_TOKEN` (its `WEB_PASSWORD`)
+- `TEXT_WHISPERER_SSL_VERIFY` (set `false` for self-signed certs)
 
 ---
 

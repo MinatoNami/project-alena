@@ -1,145 +1,48 @@
 from __future__ import annotations
 
 import asyncio
-import io
 import logging
-import subprocess
-import tempfile
-from pathlib import Path
 from typing import Optional
 
 import httpx
-import websockets
 from telegram import Update
 from telegram.constants import ChatType
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
+
+from modules.stt import (
+    STTError,
+    STTUnavailable,
+    TextWhispererClient,
+    TextWhispererConfig,
+)
 
 from .config import TelegramBotConfig, load_config
 
 LOGGER = logging.getLogger(__name__)
 
-VOICE_ASSISTANT_BACKEND = (
-    Path(__file__).resolve().parents[1] / "voice-assistant" / "backend"
-)
-if VOICE_ASSISTANT_BACKEND.exists():
-    import sys
-
-    if str(VOICE_ASSISTANT_BACKEND) not in sys.path:
-        sys.path.insert(0, str(VOICE_ASSISTANT_BACKEND))
-
-try:
-    from app.config import Settings
-    from app.services.stt.whisper import WhisperSTT
-except Exception as exc:  # pragma: no cover - optional dependency path
-    Settings = None  # type: ignore
-    WhisperSTT = None  # type: ignore
-    LOGGER.warning("Whisper backend unavailable: %s", exc)
-
-
-def _is_wav_bytes(data: bytes) -> bool:
-    return len(data) >= 12 and data[0:4] == b"RIFF" and data[8:12] == b"WAVE"
-
-
-def _ogg_to_wav_via_librosa(ogg_bytes: bytes) -> Optional[bytes]:
-    tmp_path: Optional[str] = None
-    try:
-        import numpy as np
-        from scipy.io import wavfile  # type: ignore
-        import librosa  # type: ignore
-
-        with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
-            tmp.write(ogg_bytes)
-            tmp.flush()
-            tmp_path = tmp.name
-
-        audio_data, sample_rate = librosa.load(tmp_path, sr=None, mono=True)
-        audio_int16 = (audio_data * 32767).astype(np.int16)
-        wav_buffer = io.BytesIO()
-        wavfile.write(wav_buffer, sample_rate, audio_int16)
-        wav_buffer.seek(0)
-        return wav_buffer.read()
-    except Exception as exc:
-        LOGGER.debug("librosa conversion failed: %s", exc)
-        return None
-    finally:
-        if tmp_path:
-            try:
-                Path(tmp_path).unlink()
-            except Exception:
-                pass
-
-
-def _ogg_to_wav_via_ffmpeg(ogg_bytes: bytes) -> bytes:
-    with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp_in:
-        tmp_in.write(ogg_bytes)
-        tmp_in.flush()
-        input_path = tmp_in.name
-
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_out:
-        output_path = tmp_out.name
-
-    try:
-        result = subprocess.run(
-            [
-                "ffmpeg",
-                "-y",
-                "-i",
-                input_path,
-                "-ac",
-                "1",
-                "-ar",
-                "16000",
-                "-f",
-                "wav",
-                output_path,
-            ],
-            check=False,
-            capture_output=True,
-        )
-        if result.returncode != 0:
-            stderr = result.stderr.decode("utf-8", errors="ignore")
-            raise RuntimeError(f"ffmpeg conversion failed: {stderr}")
-
-        return Path(output_path).read_bytes()
-    finally:
-        try:
-            Path(input_path).unlink()
-        except Exception:
-            pass
-        try:
-            Path(output_path).unlink()
-        except Exception:
-            pass
-
-
-def ogg_opus_to_wav_bytes(ogg_bytes: bytes) -> bytes:
-    if _is_wav_bytes(ogg_bytes):
-        return ogg_bytes
-
-    wav_bytes = _ogg_to_wav_via_librosa(ogg_bytes)
-    if wav_bytes is not None:
-        return wav_bytes
-
-    return _ogg_to_wav_via_ffmpeg(ogg_bytes)
-
 
 class TelegramWhisperBot:
     def __init__(self, config: TelegramBotConfig):
         self.config = config
-        self._stt = None
         self._controller_semaphore = asyncio.Semaphore(
             self.config.controller_max_concurrency
         )
 
-        if WhisperSTT is not None and Settings is not None:
-            try:
-                settings = Settings()
-                self._stt = WhisperSTT(settings)
-            except Exception as e:
-                LOGGER.warning(f"Could not initialize Whisper STT: {e}")
-                self._stt = None
+        self._stt: Optional[TextWhispererClient] = None
+        if config.stt_url:
+            self._stt = TextWhispererClient(
+                TextWhispererConfig(
+                    base_url=config.stt_url,
+                    api_token=config.stt_token,
+                    timeout_s=config.stt_timeout,
+                    language=config.stt_language,
+                    verify_ssl=config.stt_ssl_verify,
+                )
+            )
         else:
-            self._stt = None
+            LOGGER.warning(
+                "TEXT_WHISPERER_URL is not set; voice messages cannot be transcribed."
+            )
 
     def _should_forward(self, chat_id: int) -> bool:
         if chat_id == self.config.target_chat_id and not self.config.echo_in_target:
@@ -226,58 +129,24 @@ class TelegramWhisperBot:
 
         return ""
 
-    async def _transcribe_via_ws(self, audio_wav_bytes: bytes) -> str:
-        if not self.config.stt_ws_url:
-            return ""
+    async def _transcribe(self, audio: bytes, filename: str) -> str:
+        """Transcribe a voice memo on text-whisperer.
 
-        try:
-            ssl_context = None
-            if self.config.stt_ws_url.startswith("wss://"):
-                import ssl
+        The bytes go up exactly as Telegram sent them: text-whisperer decodes
+        with ffmpeg, so converting ogg/opus to WAV here would only be work done
+        twice, and it is why this module no longer needs librosa or scipy.
+        """
+        if self._stt is None:
+            raise STTUnavailable("TEXT_WHISPERER_URL is not configured")
 
-                if self.config.stt_ssl_verify:
-                    ssl_context = ssl.create_default_context()
-                else:
-                    ssl_context = ssl._create_unverified_context()
-
-            async with websockets.connect(
-                self.config.stt_ws_url,
-                max_size=25_000_000,
-                open_timeout=self.config.stt_timeout,
-                ssl=ssl_context,
-            ) as ws:
-                try:
-                    message = await asyncio.wait_for(ws.recv(), timeout=5)
-                    if message:
-                        LOGGER.debug("STT WS ready: %s", message)
-                except Exception:
-                    pass
-
-                await ws.send('{"action":"start"}')
-                await ws.send(audio_wav_bytes)
-                await ws.send('{"action":"end"}')
-
-                while True:
-                    msg = await asyncio.wait_for(
-                        ws.recv(), timeout=self.config.stt_timeout
-                    )
-                    if not msg:
-                        continue
-                    try:
-                        import json
-
-                        data = msg if isinstance(msg, str) else msg.decode("utf-8")
-                        payload = json.loads(data)
-                    except Exception:
-                        continue
-
-                    if isinstance(payload, dict) and payload.get("type") == "stt":
-                        return str(payload.get("text") or "")
-        except Exception as exc:
-            LOGGER.exception("Remote STT websocket failed")
-            return f""
-
-        return ""
+        transcript = await self._stt.transcribe(audio, filename)
+        LOGGER.info(
+            "Transcribed %.1fs of audio in %.1fs (lang: %s)",
+            transcript.audio_seconds,
+            transcript.elapsed_seconds,
+            transcript.language,
+        )
+        return transcript.text.strip()
 
     async def handle_text(
         self, update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -343,25 +212,31 @@ class TelegramWhisperBot:
         )
 
         if self._stt is None:
-            if not self.config.stt_ws_url:
-                await context.bot.send_message(
-                    chat_id=self.config.target_chat_id,
-                    text="Whisper backend not configured; cannot transcribe voice.",
-                )
-                return
+            await context.bot.send_message(
+                chat_id=self.config.target_chat_id,
+                text=(
+                    "Transcription is not configured; set TEXT_WHISPERER_URL "
+                    "to reach text-whisperer."
+                ),
+            )
+            return
 
         voice_file = await context.bot.get_file(message.voice.file_id)
-        ogg_bytes = await voice_file.download_as_bytearray()
+        # Telegram voice memos are ogg/opus; send them on untouched.
+        audio = bytes(await voice_file.download_as_bytearray())
 
         try:
-            wav_bytes = ogg_opus_to_wav_bytes(bytes(ogg_bytes))
-            text = ""
-            if self.config.stt_ws_url:
-                text = (await self._transcribe_via_ws(wav_bytes)).strip()
-            if not text and self._stt is not None:
-                result = await self._stt.transcribe_wav_bytes(wav_bytes)
-                text = (result.get("text") or "").strip()
-        except Exception as exc:
+            text = await self._transcribe(audio, f"voice-{message.message_id}.ogg")
+        except STTUnavailable as exc:
+            # Retryable: the Mac is asleep or off the tailnet. Say so plainly
+            # rather than making it look like the recording was bad.
+            LOGGER.warning("text-whisperer unreachable: %s", exc)
+            await context.bot.send_message(
+                chat_id=self.config.target_chat_id,
+                text=f"Transcription service is unreachable right now: {exc}",
+            )
+            return
+        except STTError as exc:
             LOGGER.exception("Voice transcription failed")
             await context.bot.send_message(
                 chat_id=self.config.target_chat_id,

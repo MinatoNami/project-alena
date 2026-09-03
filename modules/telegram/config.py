@@ -26,8 +26,10 @@ class TelegramBotConfig:
     controller_url: str
     controller_timeout: float
     controller_max_concurrency: int
-    stt_ws_url: Optional[str]
+    stt_url: Optional[str]
+    stt_token: str
     stt_timeout: float
+    stt_language: str
     stt_ssl_verify: bool
 
 
@@ -81,9 +83,17 @@ def load_config() -> TelegramBotConfig:
     if controller_max_concurrency < 1:
         controller_max_concurrency = 1
 
-    stt_ws_url = os.getenv("TELEGRAM_STT_WS_URL", "").strip() or None
-    stt_timeout = float(os.getenv("TELEGRAM_STT_TIMEOUT", "60"))
-    stt_ssl_verify = os.getenv("TELEGRAM_STT_SSL_VERIFY", "true").lower() in {
+    # Transcription lives on text-whisperer now, so this is an HTTP base URL
+    # rather than the WebSocket the old in-process Whisper backend served.
+    stt_url = (
+        os.getenv("TEXT_WHISPERER_URL", "").strip()
+        or os.getenv("TELEGRAM_STT_URL", "").strip()
+        or None
+    )
+    stt_token = os.getenv("TEXT_WHISPERER_TOKEN", "").strip()
+    stt_timeout = float(os.getenv("TEXT_WHISPERER_TIMEOUT", "300"))
+    stt_language = os.getenv("TEXT_WHISPERER_LANGUAGE", "").strip()
+    stt_ssl_verify = os.getenv("TEXT_WHISPERER_SSL_VERIFY", "true").lower() in {
         "1",
         "true",
         "yes",
@@ -99,7 +109,9 @@ def load_config() -> TelegramBotConfig:
         controller_url=controller_url,
         controller_timeout=controller_timeout,
         controller_max_concurrency=controller_max_concurrency,
-        stt_ws_url=stt_ws_url,
+        stt_url=stt_url,
+        stt_token=stt_token,
         stt_timeout=stt_timeout,
+        stt_language=stt_language,
         stt_ssl_verify=stt_ssl_verify,
     )

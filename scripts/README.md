@@ -139,12 +139,20 @@ ALENA_CONTROLLER_TIMEOUT=120
 ALENA_MAX_TOOL_STEPS=3
 ```
 
-**Ollama:**
+**LM Studio (inference):**
 
 ```dotenv
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=gpt-oss:20b
-OLLAMA_TIMEOUT=120
+LLM_BASE_URL=http://localhost:1234
+# Blank uses whichever model LM Studio has loaded.
+LLM_MODEL=
+LLM_TIMEOUT=120
+```
+
+**text-whisperer (speech-to-text):**
+
+```dotenv
+TEXT_WHISPERER_URL=http://macbook-pro-14-m4-pro:8090
+TEXT_WHISPERER_TOKEN=
 ```
 
 See `.env.example` for all available options.
