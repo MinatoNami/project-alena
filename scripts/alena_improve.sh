@@ -27,6 +27,16 @@ for var in ALENA_REPOSITORIES ALENA_TOOL_POLICY; do
   fi
 done
 
+# launchd starts a job with a bare PATH -- no login shell, no profile. Codex
+# lives in ~/.local/bin for an npm global install, and a scheduled review that
+# cannot find it fails at 22:30 on a Wednesday with nobody watching.
+for dir in "$HOME/.local/bin" /opt/homebrew/bin /usr/local/bin; do
+  if [[ -d "$dir" && ":$PATH:" != *":$dir:"* ]]; then
+    PATH="$dir:$PATH"
+  fi
+done
+export PATH
+
 PYTHON="${ALENA_PYTHON:-python3}"
 if [[ -x "$ROOT_DIR/.venv/bin/python" ]]; then
   PYTHON="$ROOT_DIR/.venv/bin/python"

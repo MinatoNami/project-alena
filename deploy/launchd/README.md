@@ -5,9 +5,9 @@ Every trigger in the spec is a subcommand, so scheduling is `launchd` calling
 application: launchd survives reboots, and a subcommand can be re-run by hand
 when a night looks wrong.
 
-**Nothing here is installed for you.** These are templates. Installing a
-launchd job is a persistent change to your machine that starts running
-software on a timer, so it is a decision to make deliberately.
+These are templates with `/Users/YOU` in them. Installing a launchd job is a
+persistent change to the machine that starts running software on a timer, so
+it is a decision to make deliberately -- nothing installs itself.
 
 ## The cadence
 
@@ -31,11 +31,23 @@ scripts/alena_improve.sh review --all --agent claude --dry-run
 
 ## Installing one
 
-Edit the paths in a plist, then:
+Substitute the paths, then load it:
 
 ```bash
-cp deploy/launchd/local.alena.scan.plist ~/Library/LaunchAgents/
+sed "s|/Users/YOU|$HOME|g" deploy/launchd/local.alena.scan.plist \
+  > ~/Library/LaunchAgents/local.alena.scan.plist
+mkdir -p ~/.alena/logs
 launchctl load ~/Library/LaunchAgents/local.alena.scan.plist
+```
+
+Run it once by hand before trusting the timer. `kickstart -k` starts it now,
+which is the only way to find out whether it works in launchd's environment
+rather than in your shell's:
+
+```bash
+launchctl kickstart -k "gui/$(id -u)/local.alena.scan"
+launchctl print "gui/$(id -u)/local.alena.scan" | grep -E "state|last exit"
+tail -f ~/.alena/logs/scan.log
 ```
 
 To check on it, and to stop it:
@@ -44,6 +56,31 @@ To check on it, and to stop it:
 launchctl list | grep alena
 launchctl unload ~/Library/LaunchAgents/local.alena.scan.plist
 ```
+
+### The environment a job actually gets
+
+launchd starts a job with a bare `PATH` -- no login shell, no profile, none of
+what your terminal has. `scripts/alena_improve.sh` therefore prepends
+`~/.local/bin`, `/opt/homebrew/bin` and `/usr/local/bin` itself. Without that
+a scheduled `review` cannot find the Codex CLI, which npm installs to
+`~/.local/bin`, and it fails at 22:30 on a Wednesday with nobody watching.
+
+`ALENA_WORKSPACE_ROOT` is set per job in `EnvironmentVariables` rather than in
+a `.env`, so installing a schedule does not quietly change what an interactive
+run is allowed to touch.
+
+## Research is still a manual step
+
+There is no template for `ingest-research`. It takes one repository at a time,
+and the ChatGPT Work output arrives however you fetch it, so a timer would be
+guessing at both. The weekly rhythm is:
+
+```bash
+scripts/alena_improve.sh ingest-research luma-index ~/Downloads/luma-2026-09-10.md
+```
+
+Until something is ingested, the Wednesday and Thursday jobs are correct
+no-ops -- they run, find no new observations, and exit zero.
 
 ## Before you turn any of it on
 
