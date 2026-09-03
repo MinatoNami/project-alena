@@ -28,6 +28,8 @@ def test_run_codex_builds_command_without_apply(monkeypatch):
         "--json",
         "--foo",
         "bar",
+        "--sandbox",
+        "read-only",
     ]
     assert captured["input"] == "hello"
     assert captured["cwd"] == "/repo"
@@ -52,7 +54,6 @@ def test_run_codex_builds_command_with_apply(monkeypatch):
         "exec",
         "--json",
         "--flag",
-        "--full-auto",
         "--sandbox",
         "workspace-write",
     ]
@@ -66,3 +67,32 @@ def test_run_codex_raises_on_error(monkeypatch):
 
     with pytest.raises(RuntimeError, match="boom"):
         codex_runner.run_codex("fail")
+
+
+def test_analysis_runs_in_a_read_only_sandbox(monkeypatch):
+    """Defence in depth: a read tool cannot write even if something above it
+    went wrong."""
+    captured = {}
+
+    def fake_run(cmd, input, capture_output, text, cwd, check):
+        captured["cmd"] = cmd
+        return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(codex_runner.subprocess, "run", fake_run)
+    codex_runner.run_codex("analyse this")
+
+    assert captured["cmd"][-2:] == ["--sandbox", "read-only"]
+
+
+def test_full_auto_is_not_passed(monkeypatch):
+    """It was removed in codex-cli 0.153 and makes the whole call fail."""
+    captured = {}
+
+    def fake_run(cmd, input, capture_output, text, cwd, check):
+        captured["cmd"] = cmd
+        return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(codex_runner.subprocess, "run", fake_run)
+    codex_runner.run_codex("edit", extra_args=["--apply"])
+
+    assert "--full-auto" not in captured["cmd"]

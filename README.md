@@ -113,6 +113,8 @@ It combines **on-device LLMs**, **speech-to-text**, and **extensible MCP (Model 
   over the tailnet, for voice — running a build that has `POST /api/transcribe`.
   See [Documents/TEXT_WHISPERER_CONTRACT.md](Documents/TEXT_WHISPERER_CONTRACT.md).
 - **Codex CLI** (used by the MCP Codex server). If you have access via your plan (e.g., ChatGPT Plus), install the Codex CLI and make sure it’s available in your `$PATH`.
+  Tested against codex-cli 0.153. Older releases took a `--full-auto` flag that
+  0.153 removed; the runner passes `--sandbox` instead.
 
 Notes:
 

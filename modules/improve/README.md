@@ -208,6 +208,14 @@ reviews.** The independent-check property holds, which is the part that
 matters, and `action/routing.py` is data so the rotation starts working when
 Claude gains a local write path.
 
+### Build artifacts stay out of the commit
+
+The implementing agent runs the tests while it works, and everything left in
+the workspace would otherwise be staged. A branch destined for review should
+not carry `__pycache__`, `.pytest_cache` or `node_modules`, so staging is by
+path with a short list of universally-generated names filtered out. A run that
+produced *only* artifacts counts as having changed nothing.
+
 ### On failure, nothing is left behind
 
 A failed run reverts tracked files, removes what the agent created, returns to

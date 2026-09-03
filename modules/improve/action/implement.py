@@ -36,6 +36,41 @@ AGENT = "action-agent"
 BRANCH_PREFIX = "alena/"
 _SLUG = re.compile(r"[^a-z0-9]+")
 
+# Build artifacts that are never part of a change, kept out of the commit.
+#
+# The implementing agent runs the tests while it works, and everything it
+# leaves behind gets staged -- a branch destined for review should not carry
+# byte-compiled caches. The list is deliberately short and unambiguous: these
+# are generated in every repository that uses the tool, and a repository with
+# a .gitignore would have excluded them anyway.
+GENERATED_ARTIFACTS = (
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    ".DS_Store",
+    "node_modules",
+    ".coverage",
+    "htmlcov",
+)
+_ARTIFACT_SUFFIXES = (".pyc", ".pyo", ".egg-info")
+
+
+def is_generated_artifact(path: str) -> bool:
+    """True if any part of the path is a build artifact.
+
+    Matched per segment, so `src/thing.egg-info/PKG-INFO` is caught by its
+    directory rather than only by its own name.
+    """
+    for segment in path.strip("/").split("/"):
+        if not segment:
+            continue
+        if segment in GENERATED_ARTIFACTS:
+            return True
+        if segment.endswith(_ARTIFACT_SUFFIXES):
+            return True
+    return False
+
 
 def branch_name(recommendation_id: int, title: str) -> str:
     slug = _SLUG.sub("-", title.lower()).strip("-")[:48].strip("-")
@@ -192,7 +227,14 @@ async def implement_async(
             logger.info(f"{repository.id}: codex_edit returned {type(result).__name__}")
 
         # Outside the grant from here: everything below only reads.
-        run.files_changed = git.dirty_files()
+        touched = git.dirty_files()
+        run.files_changed = [p for p in touched if not is_generated_artifact(p)]
+        discarded = [p for p in touched if is_generated_artifact(p)]
+        if discarded:
+            logger.info(
+                f"{repository.id}: leaving build artifacts out of the commit: "
+                f"{', '.join(discarded)}"
+            )
         if not run.files_changed:
             run.error = "the implementing agent changed nothing"
             run.status = "failed"
@@ -202,7 +244,10 @@ async def implement_async(
             )
             return run
 
-        git.run("add", "-A")
+        # Staged by path rather than `add -A`, so the artifacts filtered out
+        # above stay out. The pre-flight check means everything listed here is
+        # the agent's own work.
+        git.run("add", "--", *run.files_changed)
         git.run(
             "commit",
             "-m",

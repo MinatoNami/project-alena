@@ -352,3 +352,66 @@ def test_a_missing_runner_is_reported_rather_than_swallowed(tmp_path):
 
 def test_no_command_means_not_run():
     assert not TestResult(None, None, "no test command detected").ran
+
+
+# -- build artifacts -------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "__pycache__/",
+        "src/__pycache__/app.cpython-314.pyc",
+        ".pytest_cache/v/cache",
+        "node_modules/left-pad/index.js",
+        "app.pyc",
+        "src/mypackage.egg-info/PKG-INFO",
+        ".DS_Store",
+    ],
+)
+def test_build_artifacts_are_recognised(path):
+    from modules.improve.action.implement import is_generated_artifact
+
+    assert is_generated_artifact(path)
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["src/app.py", "docs/pycache_notes.md", "src/egg-info-guide.md", "tests/test_x.py"],
+)
+def test_real_files_are_not_mistaken_for_artifacts(path):
+    from modules.improve.action.implement import is_generated_artifact
+
+    assert not is_generated_artifact(path)
+
+
+def test_artifacts_the_agent_leaves_behind_are_not_committed(repo, writable, accepted):
+    """The implementing agent runs the tests while it works; a branch destined
+    for review should not carry byte-compiled caches."""
+
+    async def messy(server, tool, arguments, **kwargs):
+        workspace = Path(arguments["repo_path"])
+        (workspace / "feature.py").write_text("VALUE = 1\n")
+        cache = workspace / "__pycache__"
+        cache.mkdir(exist_ok=True)
+        (cache / "feature.cpython-314.pyc").write_bytes(b"\x00compiled")
+        return type("Result", (), {"content": []})()
+
+    outcome = run(writable, accepted, executor=messy)
+
+    assert outcome.files_changed == ["feature.py"]
+    committed = git(repo, "show", "--name-only", "--format=", outcome.branch)
+    assert "__pycache__" not in committed
+
+
+def test_a_run_that_only_produced_artifacts_counts_as_no_change(repo, writable, accepted):
+    async def only_cache(server, tool, arguments, **kwargs):
+        cache = Path(arguments["repo_path"]) / "__pycache__"
+        cache.mkdir(exist_ok=True)
+        (cache / "x.pyc").write_bytes(b"\x00")
+        return type("Result", (), {"content": []})()
+
+    outcome = run(writable, accepted, executor=only_cache)
+
+    assert not outcome.ok
+    assert "changed nothing" in outcome.error

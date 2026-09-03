@@ -1,8 +1,16 @@
 import subprocess
-import json
 from typing import Optional
 
 CODEX_BIN = "codex"  # must be in PATH
+
+# Sandbox modes, passed explicitly on every call.
+#
+# Read-only is stated rather than left to the default: it is defence in depth
+# for the analysis tools, so a read tool cannot write even if something above
+# it went wrong. Workspace-write is the widest this ever asks for -- nothing
+# here uses danger-full-access.
+SANDBOX_READ_ONLY = "read-only"
+SANDBOX_WORKSPACE_WRITE = "workspace-write"
 
 
 def run_codex(
@@ -24,14 +32,14 @@ def run_codex(
     if cleaned_args:
         cmd.extend(cleaned_args)
 
-    if apply_mode:
-        cmd.extend(
-            [
-                "--full-auto",
-                "--sandbox",
-                "workspace-write",
-            ]
-        )
+    # `--full-auto` was removed in codex-cli 0.153. `exec` is already
+    # non-interactive, so the sandbox mode is the whole of what it meant.
+    cmd.extend(
+        [
+            "--sandbox",
+            SANDBOX_WORKSPACE_WRITE if apply_mode else SANDBOX_READ_ONLY,
+        ]
+    )
 
     process = subprocess.run(
         cmd, input=prompt, capture_output=True, text=True, cwd=cwd, check=False
