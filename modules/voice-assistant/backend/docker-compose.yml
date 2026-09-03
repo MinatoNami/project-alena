@@ -14,8 +14,8 @@ services:
       - ../../../.env
     volumes:
       - ./app:/app/app:ro
-      - ../../llm:/app/modules/llm:ro
-      - ../../stt:/app/modules/stt:ro
+      - ../../../modules/llm:/app/modules/llm:ro
+      - ../../../modules/stt:/app/modules/stt:ro
 
   # frontend:
   #   build: ../frontend
