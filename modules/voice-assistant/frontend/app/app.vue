@@ -214,10 +214,11 @@ const OPEN_TAGS = ["<think>", "<thinking>", "<reasoning>"];
 const CLOSE_TAGS = ["</think>", "</thinking>", "</reasoning>"];
 
 function earliestTag(text: string, tags: string[]): [number, string] {
+  const lower = text.toLowerCase();
   let at = -1;
   let found = "";
   for (const tag of tags) {
-    const i = text.indexOf(tag);
+    const i = lower.indexOf(tag);
     if (i !== -1 && (at === -1 || i < at)) {
       at = i;
       found = tag;
