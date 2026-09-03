@@ -13,6 +13,7 @@ from modules.core.controller.normalize import normalize_codex_output
 from modules.core.controller.logger import logger
 from modules.core.controller.memory import get_default_memory, ConversationMemory
 from modules.llm import LLMUnavailable
+from modules.gateway.errors import GatewayDenied
 
 
 def _build_server_config(mcp_server_key: str) -> SimpleNamespace:
@@ -106,6 +107,38 @@ _memory = get_default_memory()
 
 
 async def run_agent(
+    user_input: str,
+    memory: Optional[ConversationMemory] = None,
+    tool_executor: Optional[Callable] = None,
+    *,
+    output_sink: Optional[Callable[[str], None]] = None,
+    return_output: bool = False,
+):
+    """Plan and act on one user turn.
+
+    A gateway refusal is an answer, not a crash: the planner regularly asks for
+    a tool the policy will not give it, and the CLI and the controller both
+    need that to come back as text rather than a traceback.
+    """
+    try:
+        return await _plan_and_act(
+            user_input,
+            memory,
+            tool_executor,
+            output_sink=output_sink,
+            return_output=return_output,
+        )
+    except GatewayDenied as exc:
+        message = (
+            "❌ I cannot complete this request with the available tools.\n"
+            f"Reason: {exc}"
+        )
+        logger.warning(f"GATEWAY_REFUSED_TURN: {exc.reason_code} - {exc}")
+        (output_sink or print)(message)
+        return message if return_output else None
+
+
+async def _plan_and_act(
     user_input: str,
     memory: Optional[ConversationMemory] = None,
     tool_executor: Optional[Callable] = None,

@@ -1,5 +1,17 @@
 # Tool System Architecture
 
+> **Superseded in part.** `tool_definitions.py` is no longer where tools are
+> meant to be declared. The Tool Interoperability Standard makes the MCP
+> definition the canonical contract, and `config/tool_policy.yaml` the place
+> where permissions live. This file is now a *migration shim*: it keeps the
+> existing Codex and Google Calendar tools working while MCP discovery is
+> proven against those servers, and it goes away afterwards.
+>
+> **Adding a tool today:** implement it on an MCP server and declare it in
+> `config/tool_policy.yaml`. See [modules/gateway/README.md](../../gateway/README.md).
+> The instructions below still describe how the legacy definitions work, and
+> still apply to the tools already in that file.
+
 ## Overview
 
 The tool system has been refactored to use a **centralized, single-source-of-truth** approach for defining tools and their capabilities. This makes it easy to add new MCP servers and their tools without having to update multiple files.

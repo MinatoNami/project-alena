@@ -25,6 +25,8 @@ It combines **on-device LLMs**, **speech-to-text**, and **extensible MCP (Model 
   - Modular MCP servers for actions (calendar, reminders, system ops, etc.)
   - Tool auto-registration & discovery
   - Clean separation between reasoning and execution
+  - Every call goes through the [Tool Gateway](modules/gateway/README.md):
+    policy decides, the audit log records, pooled MCP sessions execute
 
 - 🌐 **Web Interface**
 
@@ -126,7 +128,10 @@ Notes:
 - ✅ Web voice interface MVP (web app usable; supports voice memos via Telegram)
 - ✅ Telegram integration (text + voice memos → controller)
 - ✅ Codex MCP server integration (tool executor wired)
+- ✅ Tool Gateway (policy, approval, audit log, pooled MCP sessions)
 - 🚧 MCP server expansion (more MCPs planned)
+- 🚧 Autonomous codebase improvement system — see
+  [the implementation plan](Documents/ALENA_IMPROVE_IMPLEMENTATION_PLAN.md)
 - 🚧 Adaptive learning (currently stateless; KB + LLM-generated MCP servers coming next)
 
 ---

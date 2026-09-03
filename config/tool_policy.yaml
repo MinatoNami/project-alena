@@ -1,0 +1,93 @@
+# ALENA tool policy
+#
+# MCP says what a tool is and how to call it. This file says who may call it,
+# against which repository, and whether a human has to agree first.
+#
+# The policy fails closed: a tool that is not listed here cannot be called at
+# all, even if an MCP server advertises it. That is what makes "every tool
+# declares its side effect" an enforced rule rather than a convention.
+#
+# Side effects, least to most consequential:
+#   read_only  local_write  repository_write  remote_write
+#   infrastructure_change  destructive
+#
+# NOTE ON APPROVAL: every `requires_approval` below is false today, because
+# Phase 0 introduces the gateway without changing what the assistant is
+# already allowed to do. The classifications are correct now; the approval
+# gate is turned on in Phase 4, when there is a human flow to approve
+# *through*. Flipping one of these to true before then will simply refuse the
+# call -- which may be what you want for codex_edit.
+
+version: 1
+
+defaults:
+  requires_approval: false
+  repositories: ["*"]
+
+tools:
+  # --- Codex MCP -----------------------------------------------------------
+  # Read-only Codex modes run `codex exec` without --apply, so they inspect
+  # but do not write.
+  codex_generate:
+    side_effect: read_only
+    allowed_agents: ["assistant", "thinking-agent", "codex"]
+
+  codex_plan:
+    side_effect: read_only
+    allowed_agents: ["assistant", "thinking-agent", "codex", "repository-analyzer"]
+
+  codex_analyze:
+    side_effect: read_only
+    allowed_agents: ["assistant", "thinking-agent", "codex", "repository-analyzer"]
+
+  codex_summarize:
+    side_effect: read_only
+    allowed_agents: ["assistant", "thinking-agent", "codex", "repository-analyzer"]
+
+  codex_doc_outline:
+    side_effect: read_only
+    allowed_agents: ["assistant", "thinking-agent", "codex"]
+
+  codex_test_plan:
+    side_effect: read_only
+    allowed_agents: ["assistant", "thinking-agent", "codex"]
+
+  # codex_edit and codex_refactor run `codex exec --full-auto --sandbox
+  # workspace-write`. They write to whatever repo_path they are handed, which
+  # is why Phase 1 resolves that path from the repository registry rather than
+  # from model output.
+  codex_edit:
+    side_effect: repository_write
+    allowed_agents: ["assistant", "action-agent"]
+    requires_approval: false
+
+  codex_refactor:
+    side_effect: repository_write
+    allowed_agents: ["assistant", "action-agent"]
+    requires_approval: false
+
+  # --- Google Calendar MCP -------------------------------------------------
+  google_list_events:
+    side_effect: read_only
+    allowed_agents: ["assistant"]
+
+  google_create_event:
+    side_effect: remote_write
+    allowed_agents: ["assistant"]
+
+  google_update_event:
+    side_effect: remote_write
+    allowed_agents: ["assistant"]
+
+  # Deleting a calendar event destroys data that ALENA cannot restore.
+  google_delete_event:
+    side_effect: destructive
+    allowed_agents: ["assistant"]
+
+# Per-repository overrides. Deny always beats allow. A repository with no entry
+# here inherits whatever the tool policy above permits.
+#
+# repositories:
+#   production-control-plane:
+#     allow: ["repo.*", "git.read.*", "dependency.*", "test.*"]
+#     deny: ["git.push", "infrastructure.apply", "database.write"]
