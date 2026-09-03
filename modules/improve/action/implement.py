@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from modules.core.controller.logger import logger
@@ -30,7 +31,7 @@ from ..decide import ACCEPTED, get_recommendation
 from ..registry import Repository
 from ..scan import GitError, GitRepository
 from .routing import Pairing, pair_for
-from .verify import DiffReview, TestResult, detect_test_command, review_diff, run_tests
+from .verify import DiffReview, TestResult, detect_test_suites, review_diff, run_tests
 
 AGENT = "action-agent"
 BRANCH_PREFIX = "alena/"
@@ -54,6 +55,8 @@ GENERATED_ARTIFACTS = (
     "htmlcov",
 )
 _ARTIFACT_SUFFIXES = (".pyc", ".pyo", ".egg-info")
+
+MAX_TEST_OUTPUT = 20000
 
 
 def is_generated_artifact(path: str) -> bool:
@@ -259,8 +262,13 @@ async def implement_async(
         run.commit_sha = git.head_sha()
 
         if run_tests_enabled:
-            command = detect_test_command(repository.workspace, git.tracked_files())
-            run.tests = run_tests(repository.workspace, command)
+            # Driven by what changed, so a frontend edit does not run the
+            # backend suite -- and, more importantly, so a monorepo's tests
+            # are found at all.
+            suites = detect_test_suites(
+                repository.workspace, git.tracked_files(), run.files_changed
+            )
+            run.tests = _run_suites(repository.workspace, suites)
         else:
             run.tests = TestResult(None, None, "skipped")
 
@@ -310,6 +318,28 @@ async def implement_async(
 
     run.status = "failed"
     return run
+
+
+def _run_suites(workspace: Path, suites: List[tuple]) -> TestResult:
+    """Run every suite the change touches, and fail if any of them fails."""
+    if not suites:
+        return TestResult(None, None, "no test command detected")
+
+    results = [
+        run_tests(workspace, command, directory=directory)
+        for command, directory in suites
+    ]
+    ran = [r for r in results if r.ran]
+    if not ran:
+        return results[0]
+
+    return TestResult(
+        command="; ".join(f"{r.command}" + (f" ({r.directory})" if r.directory else "") for r in ran),
+        passed=all(r.passed for r in ran),
+        output="\n\n".join(
+            f"--- {r.directory or '.'}: {r.command}\n{r.output}" for r in results
+        )[-MAX_TEST_OUTPUT:],
+    )
 
 
 def _restore(git: GitRepository, base: str, branch: Optional[str]) -> None:

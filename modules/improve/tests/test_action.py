@@ -415,3 +415,110 @@ def test_a_run_that_only_produced_artifacts_counts_as_no_change(repo, writable, 
 
     assert not outcome.ok
     assert "changed nothing" in outcome.error
+
+
+# -- finding tests in a monorepo -------------------------------------------
+
+
+@pytest.fixture
+def monorepo(tmp_path):
+    """LumaIndex's shape: manifests in subdirectories, nothing at the root."""
+    workspace = tmp_path / "mono"
+    (workspace / "frontend").mkdir(parents=True)
+    (workspace / "backend").mkdir(parents=True)
+    (workspace / "frontend" / "package.json").write_text(
+        '{"scripts": {"test": "vitest run", "build": "nuxt build"}}'
+    )
+    (workspace / "backend" / "pytest.ini").write_text("[pytest]\n")
+    return workspace, [
+        "README.md",
+        "frontend/package.json",
+        "frontend/nuxt.config.ts",
+        "backend/pytest.ini",
+        "backend/app.py",
+    ]
+
+
+def test_manifests_in_subdirectories_are_found(monorepo):
+    """Looking only at the root found neither, so a change went to review with
+    its tests never run -- which reads as "there were no tests"."""
+    from modules.improve.action.verify import detect_test_suites
+
+    workspace, tracked = monorepo
+    assert detect_test_suites(workspace, tracked) == [
+        ("pytest -q", "backend"),
+        ("npm test --silent", "frontend"),
+    ]
+
+
+def test_only_the_suites_the_change_touches_are_run(monorepo):
+    from modules.improve.action.verify import detect_test_suites
+
+    workspace, tracked = monorepo
+    assert detect_test_suites(workspace, tracked, ["frontend/nuxt.config.ts"]) == [
+        ("npm test --silent", "frontend")
+    ]
+
+
+def test_a_change_spanning_both_runs_both(monorepo):
+    from modules.improve.action.verify import detect_test_suites
+
+    workspace, tracked = monorepo
+    suites = detect_test_suites(
+        workspace, tracked, ["frontend/nuxt.config.ts", "backend/app.py"]
+    )
+    assert len(suites) == 2
+
+
+def test_a_change_owned_by_no_project_runs_nothing(monorepo):
+    from modules.improve.action.verify import detect_test_suites
+
+    workspace, tracked = monorepo
+    assert detect_test_suites(workspace, tracked, ["README.md"]) == []
+
+
+def test_a_package_without_a_test_script_is_not_a_suite(tmp_path):
+    from modules.improve.action.verify import detect_test_suites
+
+    (tmp_path / "web").mkdir()
+    (tmp_path / "web" / "package.json").write_text('{"scripts": {"build": "vite"}}')
+
+    assert detect_test_suites(tmp_path, ["web/package.json"]) == []
+
+
+def test_a_nested_change_finds_its_nearest_manifest(monorepo):
+    from modules.improve.action.verify import detect_test_suites
+
+    workspace, tracked = monorepo
+    suites = detect_test_suites(
+        workspace, tracked, ["frontend/components/deep/Thing.vue"]
+    )
+    assert suites == [("npm test --silent", "frontend")]
+
+
+def test_one_failing_suite_fails_the_run(monorepo, monkeypatch):
+    from modules.improve.action import implement as implement_module
+    from modules.improve.action.verify import TestResult
+
+    workspace, _ = monorepo
+    results = iter(
+        [
+            TestResult("pytest -q", True, "ok", "backend"),
+            TestResult("npm test --silent", False, "boom", "frontend"),
+        ]
+    )
+    monkeypatch.setattr(
+        implement_module, "run_tests", lambda *a, **k: next(results)
+    )
+
+    combined = implement_module._run_suites(
+        workspace, [("pytest -q", "backend"), ("npm test --silent", "frontend")]
+    )
+    assert combined.passed is False
+    assert "boom" in combined.output
+
+
+def test_the_directory_appears_in_the_description():
+    from modules.improve.action.verify import TestResult
+
+    assert "frontend" in TestResult("npm test", True, "", "frontend").describe()

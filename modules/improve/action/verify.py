@@ -7,7 +7,7 @@ import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from modules.core.controller.logger import logger
 
@@ -23,6 +23,7 @@ class TestResult:
     command: Optional[str]
     passed: Optional[bool]
     output: str = ""
+    directory: str = ""
 
     @property
     def ran(self) -> bool:
@@ -34,38 +35,95 @@ class TestResult:
             # none"; "the runner is missing" is a thing someone can fix.
             detail = (self.output or "no test command detected").strip()
             return f"tests not run ({detail})"
-        return f"tests {'passed' if self.passed else 'FAILED'} ({self.command})"
+        where = f" in {self.directory}" if self.directory else ""
+        return f"tests {'passed' if self.passed else 'FAILED'} ({self.command}{where})"
 
 
-def detect_test_command(workspace: Path, tracked: List[str]) -> Optional[str]:
-    """Guess how this repository runs its tests.
+def _command_for(workspace: Path, directory: str, names: set) -> Optional[str]:
+    """How the project rooted at `directory` runs its tests, if it says."""
+    if {"pytest.ini", "conftest.py", "pyproject.toml", "setup.cfg"} & names:
+        return "pytest -q"
+    if "package.json" in names:
+        try:
+            manifest = json.loads(
+                (workspace / directory / "package.json").read_text()
+                if directory
+                else (workspace / "package.json").read_text()
+            )
+        except (OSError, json.JSONDecodeError):
+            return None
+        if "test" in (manifest.get("scripts") or {}):
+            return "npm test --silent"
+        return None
+    if "go.mod" in names:
+        return "go test ./..."
+    return None
+
+
+def detect_test_suites(
+    workspace: Path, tracked: List[str], changed: Optional[List[str]] = None
+) -> List[Tuple[str, str]]:
+    """Every (command, directory) the change implicates, nearest manifest first.
+
+    A monorepo keeps its manifests in subdirectories -- LumaIndex has
+    `frontend/package.json` and `backend/pytest.ini`, and nothing at the root.
+    Looking only at the root found neither, so a change to the frontend went
+    to review with its tests never run, which is the worst available answer:
+    it reads as "there were no tests" rather than "nobody looked".
+
+    Driven by what changed, so a one-line frontend edit does not run the
+    backend suite. With no change list, every project found is returned.
+    """
+    manifests: Dict[str, set] = {}
+    for relative in tracked:
+        path = Path(relative)
+        if path.name in {
+            "pytest.ini", "conftest.py", "pyproject.toml", "setup.cfg",
+            "package.json", "go.mod",
+        }:
+            directory = str(path.parent) if str(path.parent) != "." else ""
+            manifests.setdefault(directory, set()).add(path.name)
+
+    if changed:
+        # Keep the projects that own a changed file: walk up from each change
+        # and take the nearest directory that has a manifest.
+        wanted = set()
+        for relative in changed:
+            parts = Path(relative).parent
+            candidates = [str(parts), *(str(p) for p in parts.parents)]
+            for candidate in candidates:
+                key = "" if candidate == "." else candidate
+                if key in manifests:
+                    wanted.add(key)
+                    break
+        manifests = {k: v for k, v in manifests.items() if k in wanted}
+
+    suites = []
+    for directory in sorted(manifests, key=lambda d: (d.count("/"), d)):
+        command = _command_for(workspace, directory, manifests[directory])
+        if command:
+            suites.append((command, directory))
+    return suites
+
+
+def detect_test_command(
+    workspace: Path, tracked: List[str], changed: Optional[List[str]] = None
+) -> Optional[str]:
+    """The first test command the change implicates, or None.
 
     A guess, and treated as one: an unrecognised project reports "not run"
     rather than having something invented for it. Claiming tests passed when
     none ran is the worst possible answer here.
     """
-    names = {Path(p).name for p in tracked}
-    if {"pytest.ini", "conftest.py", "pyproject.toml", "setup.cfg"} & names:
-        return "pytest -q"
-    if any(p.startswith("tests/") or "/tests/" in p for p in tracked):
-        if any(p.endswith(".py") for p in tracked):
-            return "pytest -q"
-    if "package.json" in names:
-        try:
-            manifest = json.loads((workspace / "package.json").read_text())
-        except (OSError, json.JSONDecodeError):
-            return None
-        if "test" in (manifest.get("scripts") or {}):
-            return "npm test --silent"
-    if "go.mod" in names:
-        return "go test ./..."
-    return None
+    suites = detect_test_suites(workspace, tracked, changed)
+    return suites[0][0] if suites else None
 
 
 def run_tests(
     workspace: Path,
     command: Optional[str],
     timeout: int = DEFAULT_TIMEOUT,
+    directory: str = "",
 ) -> TestResult:
     if not command:
         return TestResult(command=None, passed=None, output="no test command detected")
@@ -73,7 +131,7 @@ def run_tests(
     try:
         process = subprocess.run(
             shlex.split(command),
-            cwd=str(workspace),
+            cwd=str(workspace / directory) if directory else str(workspace),
             capture_output=True,
             text=True,
             timeout=timeout,

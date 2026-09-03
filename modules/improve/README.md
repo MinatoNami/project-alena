@@ -321,6 +321,18 @@ reviews.** The independent-check property holds, which is the part that
 matters, and `action/routing.py` is data so the rotation starts working when
 Claude gains a local write path.
 
+### Tests are found where the change is
+
+A monorepo keeps its manifests in subdirectories. LumaIndex has
+`frontend/package.json` and `backend/pytest.ini` and nothing at the root, and
+looking only at the root found neither — so the first live implementation went
+to review reporting "tests not run", which reads as *there were no tests*
+rather than *nobody looked*.
+
+Suites are now found by walking up from the changed files to the nearest
+manifest, so a frontend edit runs the frontend suite and not the backend one,
+and a change spanning both runs both. Any suite failing fails the run.
+
 ### Build artifacts stay out of the commit
 
 The implementing agent runs the tests while it works, and everything left in
