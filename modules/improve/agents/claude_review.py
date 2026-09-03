@@ -293,3 +293,82 @@ def review_observation(
         requires_architecture_review=bool(payload.get("requires_architecture_review")),
         security_sensitive=payload.get("security_sensitive"),
     )
+
+
+@dataclass(frozen=True)
+class RoutineCheck:
+    """The result of asking the routine one trivial question."""
+
+    ok: bool
+    detail: str
+    answer: Optional[str] = None
+    verdict: Optional[str] = None
+
+    def describe(self) -> str:
+        return ("ok: " if self.ok else "failed: ") + self.detail
+
+
+PROBE_PROMPT = """This is a connectivity check from ALENA. Do not inspect any
+repository and do not do any work.
+
+Reply with exactly one short sentence confirming you received this, then a
+fenced JSON block and nothing after it:
+
+```json
+{"verdict": "supported", "summary": "connectivity check"}
+```"""
+
+
+def check_routine(config: Optional[RoutineConfig] = None, caller=None) -> RoutineCheck:
+    """Ask the routine one trivial question and report what came back.
+
+    This exists because the client has never met a live endpoint. The contract
+    it speaks is documented rather than observed, so the first thing anyone
+    needs after setting CLAUDE_ROUTINE_URL is to find out whether the envelope
+    matches -- and finding that out during a Thursday 02:00 escalation is the
+    worst time for it.
+
+    It distinguishes three failures that look the same from the outside: the
+    URL is not set, the endpoint could not be reached, and the endpoint
+    answered in a shape the client cannot read.
+    """
+    from .codex_review import parse_verdict
+
+    try:
+        config = config or RoutineConfig.from_env()
+    except RoutineNotConfigured as exc:
+        return RoutineCheck(False, str(exc))
+
+    caller = caller or call_routine
+    try:
+        answer = caller(
+            PROBE_PROMPT, config=config, metadata={"kind": "connectivity-check"}
+        )
+    except Exception as exc:  # noqa: BLE001
+        return RoutineCheck(False, f"{type(exc).__name__}: {exc}")
+
+    if not (answer or "").strip():
+        return RoutineCheck(
+            False,
+            "the routine answered, but the client could not find any text in "
+            "the response. Adjust extract_text() in this module to match your "
+            "routine's envelope.",
+        )
+
+    payload = parse_verdict(answer)
+    if payload["verdict"] == "unclear":
+        return RoutineCheck(
+            True,
+            "reachable, and text came back, but no JSON verdict could be "
+            "parsed from it. Reviews will still be recorded and readable; "
+            "their scores will fall back to neutral.",
+            answer=answer,
+            verdict=payload["verdict"],
+        )
+
+    return RoutineCheck(
+        True,
+        f"reachable, and a {payload['verdict']!r} verdict parsed cleanly.",
+        answer=answer,
+        verdict=payload["verdict"],
+    )

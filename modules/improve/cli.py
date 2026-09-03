@@ -443,6 +443,18 @@ def cmd_tools(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_check_routine(args: argparse.Namespace) -> int:
+    """Ask the Claude routine one trivial question."""
+    from .agents.claude_review import check_routine
+
+    result = check_routine()
+    print(f"claude routine: {result.describe()}")
+    if result.answer and args.verbose:
+        print()
+        print(result.answer.strip()[:1500])
+    return 0 if result.ok else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     # Config paths are accepted both before and after the subcommand: the
     # natural thing to type is `scan --all --registry x`, but the global form
@@ -607,6 +619,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip starting the MCP servers to enumerate their tools",
     )
     tools.set_defaults(func=cmd_tools)
+
+    check = sub.add_parser(
+        "check-routine",
+        parents=[common],
+        help="Ask the Claude routine one trivial question, to test the wiring",
+    )
+    check.add_argument("--verbose", action="store_true", help="Print the reply")
+    check.set_defaults(func=cmd_check_routine)
 
     return parser
 

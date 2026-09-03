@@ -248,3 +248,71 @@ def test_the_repository_and_observation_are_sent_as_metadata(repository):
 
     assert seen["repository_id"] == repository.id
     assert seen["observation_id"] == 1
+
+
+# -- the connectivity check ------------------------------------------------
+
+
+def test_the_check_says_when_the_url_is_not_set(monkeypatch):
+    from modules.improve.agents.claude_review import check_routine
+
+    monkeypatch.delenv("CLAUDE_ROUTINE_URL", raising=False)
+    result = check_routine()
+
+    assert not result.ok
+    assert "CLAUDE_ROUTINE_URL" in result.detail
+
+
+def test_the_check_reports_an_unreachable_endpoint():
+    from modules.improve.agents.claude_review import check_routine
+
+    def unreachable(prompt, **kwargs):
+        raise RoutineError("routine request failed: connect timeout")
+
+    result = check_routine(config=CONFIG, caller=unreachable)
+
+    assert not result.ok
+    assert "connect timeout" in result.detail
+
+
+def test_the_check_distinguishes_an_unreadable_envelope():
+    """Reached it, but the client cannot find the text -- a different problem
+    from not reaching it, and a different fix."""
+    from modules.improve.agents.claude_review import check_routine
+
+    result = check_routine(config=CONFIG, caller=lambda prompt, **kwargs: "")
+
+    assert not result.ok
+    assert "extract_text" in result.detail
+
+
+def test_the_check_passes_on_a_clean_verdict():
+    from modules.improve.agents.claude_review import check_routine
+
+    def working(prompt, **kwargs):
+        return 'Received.\n\n```json\n{"verdict": "supported"}\n```'
+
+    result = check_routine(config=CONFIG, caller=working)
+
+    assert result.ok
+    assert result.verdict == "supported"
+
+
+def test_the_check_passes_but_warns_when_no_verdict_parses():
+    """Text came back, so reviews will be readable; only the scores suffer."""
+    from modules.improve.agents.claude_review import check_routine
+
+    result = check_routine(
+        config=CONFIG, caller=lambda prompt, **kwargs: "Hello, I am here."
+    )
+
+    assert result.ok
+    assert "no JSON verdict" in result.detail
+
+
+def test_the_probe_asks_for_no_work():
+    """A connectivity check should not spend a review's worth of tokens."""
+    from modules.improve.agents.claude_review import PROBE_PROMPT
+
+    assert "do not do any work" in PROBE_PROMPT
+    assert "Do not inspect any" in PROBE_PROMPT
