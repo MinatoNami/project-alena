@@ -8,6 +8,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from app.config import get_settings
 from app.core.pipeline import Pipeline
 from app.utils.logger import get_logger
+from modules.stt import sniff_extension
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -27,7 +28,7 @@ def _safe_json_loads(text: str) -> Optional[Dict[str, Any]]:
 async def websocket_endpoint(ws: WebSocket) -> None:
     settings = get_settings()
     pipeline = Pipeline(settings=settings)
-    route = (settings.llm_route or "ollama").lower()
+    route = (settings.llm_route or "alena").lower()
 
     await ws.accept()
     audio_buffer = bytearray()
@@ -42,6 +43,14 @@ async def websocket_endpoint(ws: WebSocket) -> None:
             try:
                 message = await ws.receive()
             except WebSocketDisconnect:
+                logger.info("WebSocket disconnected")
+                return
+
+            # Starlette delivers a close as a message, not an exception. It
+            # carries neither "bytes" nor "text", so without this the loop
+            # falls through and calls receive() again -- which raises, and
+            # logged a traceback on every normal disconnect.
+            if message.get("type") == "websocket.disconnect":
                 logger.info("WebSocket disconnected")
                 return
 
@@ -111,7 +120,11 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                     )
 
                     try:
-                        result = await pipeline.run(audio_wav_bytes=bytes(audio_buffer))
+                        audio = bytes(audio_buffer)
+                        result = await pipeline.run(
+                            audio_bytes=audio,
+                            filename=f"recording.{sniff_extension(audio)}",
+                        )
                         await send(
                             {"type": "stt", "text": result.get("transcript", "")}
                         )
@@ -122,23 +135,23 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                         continue
 
                     if (
-                        route == "ollama"
+                        route == "lmstudio"
                         and result.get("llm_enabled")
-                        and pipeline.ollama is not None
+                        and pipeline.lmstudio is not None
                     ):
                         prompt = result.get("prompt", "")
                         await send(
                             {
                                 "type": "llm",
                                 "event": "start",
-                                "model": pipeline.ollama.model,
+                                "model": pipeline.lmstudio.model,
                                 "prompt": prompt,
                             }
                         )
 
                         try:
                             full = ""
-                            async for delta in pipeline.ollama.stream_generate(
+                            async for delta in pipeline.lmstudio.stream_generate(
                                 prompt=prompt
                             ):
                                 full += delta

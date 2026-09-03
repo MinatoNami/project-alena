@@ -2,20 +2,20 @@ name: voice-assistant
 
 services:
   backend:
-    build: .
+    build:
+      # The repo root: the image needs modules/llm and modules/stt, which sit
+      # outside this directory.
+      context: ../../..
+      dockerfile: modules/voice-assistant/backend/Dockerfile
     container_name: voice-backend
     ports:
       - "8001:8001"
     env_file:
-      - .env
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - ../../../.env
     volumes:
       - ./app:/app/app:ro
-      - ./whisper-cache:/root/.cache
-      - ./certs:/app/certs:ro
-    gpus: all
+      - ../../../modules/llm:/app/modules/llm:ro
+      - ../../../modules/stt:/app/modules/stt:ro
 
   # frontend:
   #   build: ../frontend
@@ -23,6 +23,6 @@ services:
   #   ports:
   #     - "3000:3000"
   #   environment:
-  #     - NUXT_PUBLIC_WS_AUDIO_URL=ws://backend:8001
+  #     - NUXT_PUBLIC_WS_AUDIO_URL=ws://backend:8001/ws
   #   depends_on:
   #     - backend

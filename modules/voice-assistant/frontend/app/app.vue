@@ -51,7 +51,7 @@
 
       <UCard>
         <template #header>
-          <div class="text-base font-semibold">Chat with Ollama</div>
+          <div class="text-base font-semibold">Chat</div>
         </template>
 
         <div class="flex flex-col h-96">
@@ -154,8 +154,7 @@ const draftMessage = ref("");
 const chatError = ref("");
 const chatLoading = ref(false);
 const config = useRuntimeConfig();
-const llmApiUrl =
-  (config.public as any).llmApiUrl || (config.public as any).ollamaUrl;
+const llmApiUrl = (config.public as any).llmApiUrl;
 const chatScrollEl = ref<HTMLElement | null>(null);
 
 function persistMessages() {
@@ -208,6 +207,55 @@ watch(
   { deep: true }
 );
 
+// Reasoning models (qwen3, deepseek-r1, ...) stream a <think> scratchpad ahead
+// of the answer. It arrives token by token, so whether we are inside one has to
+// be remembered between chunks rather than regexed out of a finished string.
+const OPEN_TAGS = ["<think>", "<thinking>", "<reasoning>"];
+const CLOSE_TAGS = ["</think>", "</thinking>", "</reasoning>"];
+
+function earliestTag(text: string, tags: string[]): [number, string] {
+  const lower = text.toLowerCase();
+  let at = -1;
+  let found = "";
+  for (const tag of tags) {
+    const i = lower.indexOf(tag);
+    if (i !== -1 && (at === -1 || i < at)) {
+      at = i;
+      found = tag;
+    }
+  }
+  return [at, found];
+}
+
+function createReasoningFilter() {
+  let inReasoning = false;
+  return {
+    feed(delta: string): string {
+      let kept = "";
+      let remaining = delta;
+
+      while (remaining) {
+        const [at, tag] = earliestTag(
+          remaining,
+          inReasoning ? CLOSE_TAGS : OPEN_TAGS
+        );
+        if (at === -1) {
+          if (!inReasoning) kept += remaining;
+          break;
+        }
+        if (!inReasoning) kept += remaining.slice(0, at);
+        remaining = remaining.slice(at + tag.length);
+        inReasoning = !inReasoning;
+      }
+      return kept;
+    },
+  };
+}
+
+function stripReasoning(text: string): string {
+  return createReasoningFilter().feed(text).trim();
+}
+
 async function sendMessage() {
   if (!draftMessage.value.trim() || chatLoading.value) return;
 
@@ -230,13 +278,14 @@ async function sendMessage() {
   await scrollToBottom();
 
   try {
-    const response = await fetch(`${llmApiUrl}/api/chat`, {
+    const response = await fetch(`${llmApiUrl}/v1/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gpt-oss:20b",
+        // No model: the backend substitutes whichever one LM Studio has
+        // loaded, so a name cached in this page cannot go stale.
         messages: messages.value.map((m) => ({
           role: m.role,
           content: m.content,
@@ -252,10 +301,13 @@ async function sendMessage() {
     const reader = response.body?.getReader();
     if (!reader) {
       const data = await response.json();
-      const content = data?.message?.content;
-      if (typeof content === "string") assistantMessage.content = content;
+      const content = data?.choices?.[0]?.message?.content;
+      if (typeof content === "string") {
+        assistantMessage.content = stripReasoning(content);
+      }
     } else {
       const decoder = new TextDecoder();
+      const reasoning = createReasoningFilter();
       let carry = "";
 
       while (true) {
@@ -267,16 +319,20 @@ async function sendMessage() {
         carry = lines.pop() ?? "";
 
         for (const line of lines) {
-          if (!line.trim()) continue;
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data:")) continue;
+
+          const body = trimmed.slice(5).trim();
+          if (!body || body === "[DONE]") continue;
 
           try {
-            const data = JSON.parse(line);
-            const content = data?.message?.content;
-            if (typeof content === "string") {
-              assistantMessage.content += content;
+            const data = JSON.parse(body);
+            const delta = data?.choices?.[0]?.delta?.content;
+            if (typeof delta === "string") {
+              assistantMessage.content += reasoning.feed(delta);
             }
           } catch {
-            // Skip lines that aren't valid JSON
+            // Skip frames that aren't valid JSON
           }
         }
       }

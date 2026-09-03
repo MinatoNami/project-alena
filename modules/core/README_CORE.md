@@ -20,7 +20,7 @@ The core module is responsible for:
 
 It **does not**:
 
-- Hard-code infrastructure (MCP, Ollama, Codex)
+- Hard-code infrastructure (MCP, LM Studio, Codex)
 - Perform I/O directly (except via injected executors)
 - Contain UI, voice, or transport logic
 
@@ -37,14 +37,14 @@ modules/core/
 │   ├── safety.py           # Repo & path safety checks
 │   ├── tool_registry.py    # Tool schema & validation
 │   ├── tool_executor.py    # MCP-based tool executor (pluggable)
-│   └── ollama_client.py    # Ollama client (lazy import)
+│   └── llm_client.py       # LM Studio client + planner prompt
 │
 ├── tools/
 │   └── tool_capabilities.py # Tool capability model
 │
 ├── tests/
 │   ├── test_agent_no_tool.py
-│   ├── test_agent_stubbed_ollama.py
+│   ├── test_agent_stubbed_llm.py
 │   ├── test_agent_tool_call.py
 │   ├── test_normalize_codex_output.py
 │   ├── test_safety.py
@@ -60,9 +60,9 @@ modules/core/
 ```
 User Input
    ↓
-Ollama (LLM)
+LM Studio (LLM)
    ↓
-Is JSON tool call?
+Did it call a tool?
    ├── No → return final text
    └── Yes
         ↓
@@ -136,7 +136,7 @@ checks would otherwise block it (e.g. asking Codex for the current time).
 
 All core logic is covered by **pure unit tests**.
 
-- Ollama is stubbed
+- The model is stubbed
 - Tool execution is injected
 - MCP is never started in unit tests
 - Integration tests are explicitly marked & skipped

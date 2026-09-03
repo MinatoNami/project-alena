@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from pathlib import Path
 from typing import List
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
-ROOT_DIR = Path(__file__).resolve().parents[4]
+# Resolved by walking up for modules/, so it is right both in a checkout and
+# in the container, where the app sits at a different depth.
+from app import ROOT_DIR
 
 
 class Settings(BaseSettings):
@@ -23,19 +23,21 @@ class Settings(BaseSettings):
     # WebSocket / audio
     max_audio_bytes: int = 25_000_000  # ~25MB safety limit
 
-    # Whisper / faster-whisper
-    whisper_model: str = "small"
-    whisper_device: str = "cpu"  # cpu|cuda
-    whisper_compute_type: str = "int8"  # faster-whisper compute type
+    # Speech-to-text: text-whisperer, over the tailnet. No model runs here.
+    text_whisperer_url: str = "http://macbook-pro-14-m4-pro:8090"
+    text_whisperer_token: str = ""
+    text_whisperer_timeout: float = 300.0
+    text_whisperer_language: str = ""
+    text_whisperer_ssl_verify: bool = True
 
-    # Ollama
-    ollama_enabled: bool = True
-    ollama_base_url: str = "http://localhost:11434"
-    ollama_model: str = "llama3.1"
-    ollama_timeout: float = 120.0
+    # Inference: LM Studio, or anything else speaking the OpenAI API.
+    llm_enabled: bool = True
+    llm_base_url: str = "http://localhost:1234"
+    llm_model: str = ""  # blank = whichever model LM Studio has loaded
+    llm_timeout: float = 120.0
 
     # LLM routing
-    llm_route: str = "ollama"  # ollama|alena
+    llm_route: str = "alena"  # lmstudio|alena
     alena_controller_url: str = "http://localhost:9000"
     alena_controller_timeout: float = 120.0
 

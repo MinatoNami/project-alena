@@ -4,7 +4,7 @@ import os
 from typing import Callable, Optional, Set
 from types import SimpleNamespace
 
-from modules.core.controller.ollama_client import ask_ollama
+from modules.core.controller.llm_client import ask_llm
 from modules.core.controller.normalize import normalize_codex_output
 from modules.core.controller.tool_executor import execute_tool
 from modules.core.controller.tool_definitions import get_tool_by_name
@@ -12,6 +12,7 @@ from modules.core.tools.tool_capabilities import tool_can_handle
 from modules.core.controller.normalize import normalize_codex_output
 from modules.core.controller.logger import logger
 from modules.core.controller.memory import get_default_memory, ConversationMemory
+from modules.llm import LLMUnavailable
 
 
 def _build_server_config(mcp_server_key: str) -> SimpleNamespace:
@@ -38,6 +39,23 @@ def _get_server_for_tool(tool_name: str) -> SimpleNamespace:
     # Default to codex if unknown (keeps backward-compatibility)
     server_key = tool_def.mcp_server if tool_def else "codex"
     return _build_server_config(server_key)
+
+
+def _parse_tool_call(response: str) -> Optional[dict]:
+    """Return the tool-call payload in `response`, or None if it is prose.
+
+    A reply is only a tool call if it is a JSON object naming a tool. Testing
+    for "parses as JSON" instead would crash on a model that answers with a
+    bare number or list, which json.loads accepts but has no .get().
+    """
+    try:
+        parsed = json.loads(response)
+    except json.JSONDecodeError:
+        return None
+
+    if isinstance(parsed, dict) and parsed.get("tool"):
+        return parsed
+    return None
 
 
 def infer_intents(user_input: str) -> Set[str]:
@@ -116,20 +134,25 @@ async def run_agent(
     def done() -> Optional[str]:
         return final_message if return_output else None
 
-    # 1️⃣ Ask Ollama
+    # 1️⃣ Ask the planner
     history = memory.get_messages()
-    ollama_response = ask_ollama(
-        [
-            *history,
-            {"role": "user", "content": user_input},
-        ]
-    )
+    try:
+        llm_response = ask_llm(
+            [
+                *history,
+                {"role": "user", "content": user_input},
+            ]
+        )
+    except LLMUnavailable as exc:
+        emit(f"❌ Inference server unavailable: {exc}")
+        return done()
+
     memory.add_user(user_input)
 
-    logger.info(f"OLLAMA_RESPONSE: {ollama_response}")
+    logger.info(f"LLM_RESPONSE: {llm_response}")
 
-    if not ollama_response.strip():
-        logger.warning("OLLAMA returned empty response")
+    if not llm_response.strip():
+        logger.warning("LLM returned empty response")
         if "codex" in text:
             tool = "codex_generate"
             arguments = {"prompt": user_input}
@@ -151,20 +174,19 @@ async def run_agent(
             return done()
 
         emit(
-            "❌ Ollama returned an empty response. "
-            "Check OLLAMA_BASE_URL/OLLAMA_MODEL/OLLAMA_TIMEOUT or enable OLLAMA_DEBUG=1."
+            "❌ The model returned an empty response. "
+            "Check LLM_BASE_URL/LLM_MODEL/LLM_TIMEOUT or enable LLM_DEBUG=1."
         )
         return done()
 
     # 2️⃣ Tool loop: allow multiple tool calls
     max_tool_steps = int(os.getenv("ALENA_MAX_TOOL_STEPS", "3"))
     tool_steps = 0
-    current_response = ollama_response
+    current_response = llm_response
 
     while True:
-        try:
-            parsed = json.loads(current_response)
-        except json.JSONDecodeError:
+        parsed = _parse_tool_call(current_response)
+        if parsed is None:
             intents = infer_intents(user_input)
             if "access_filesystem" in intents:
                 tool = "codex_analyze"
@@ -331,11 +353,15 @@ async def run_agent(
             "If another tool call is required, respond with a tool call JSON. "
             "Otherwise, provide the final answer."
         )
-        current_response = ask_ollama(
-            [
-                *memory.get_messages(),
-                {"role": "user", "content": followup},
-            ]
-        )
+        try:
+            current_response = ask_llm(
+                [
+                    *memory.get_messages(),
+                    {"role": "user", "content": followup},
+                ]
+            )
+        except LLMUnavailable as exc:
+            emit(f"❌ Inference server unavailable: {exc}")
+            return done()
 
     return done()
