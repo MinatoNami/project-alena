@@ -38,6 +38,7 @@ from .prompting import (
     UNTRUSTED_PREAMBLE,
     VERDICT_SCHEMA,
     observation_block,
+    operator_note,
     rejected_block,
 )
 
@@ -74,6 +75,7 @@ def build_prompt(
     observation: Dict[str, Any],
     context: Optional[str] = None,
     rejected: Optional[List[Dict[str, Any]]] = None,
+    note: Optional[str] = None,
 ) -> str:
     return f"""You are reviewing a research observation against the repository you
 are running inside. Decide whether it makes engineering sense *here*.
@@ -81,7 +83,7 @@ are running inside. Decide whether it makes engineering sense *here*.
 {UNTRUSTED_PREAMBLE}
 
 Do not modify anything. This is a read-only review.
-{rejected_block(rejected)}
+{operator_note(note)}{rejected_block(rejected)}
 Repository: {repository_name}
 {f"Context:{chr(10)}{context}{chr(10)}" if context else ""}
 {observation_block(observation)}
@@ -121,6 +123,7 @@ async def review_observation(
     *,
     context: Optional[str] = None,
     rejected: Optional[List[Dict[str, Any]]] = None,
+    note: Optional[str] = None,
     executor=None,
 ) -> ReviewResult:
     """Ask Codex about one observation, through the gateway."""
@@ -129,7 +132,7 @@ async def review_observation(
     from modules.core.controller.tool_executor import execute_tool
 
     executor = executor or execute_tool
-    prompt = build_prompt(repository.name, observation, context, rejected)
+    prompt = build_prompt(repository.name, observation, context, rejected, note)
 
     try:
         raw = await executor(

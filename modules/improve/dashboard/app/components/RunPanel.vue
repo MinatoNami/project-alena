@@ -8,6 +8,7 @@ type Command = {
   costs: string | null
   parameters: string[]
   writes: boolean
+  accepts_focus: boolean
 }
 type Run = {
   id: string
@@ -31,6 +32,7 @@ const runs = ref<Run[]>([])
 const current = ref<Run | null>(null)
 const active = ref<Run | null>(null)
 const failure = ref<string | null>(null)
+const focus = ref('')
 let timer: ReturnType<typeof setInterval> | null = null
 
 async function refresh() {
@@ -57,8 +59,14 @@ function poll() {
 
 async function start(key: string) {
   failure.value = null
+  const command = commands.value.find((c) => c.key === key)
   try {
-    active.value = await post<Run>('/api/runs', { command: key })
+    active.value = await post<Run>('/api/runs', {
+      command: key,
+      // Only sent where it is used; the API refuses it elsewhere rather than
+      // quietly dropping it.
+      focus: command?.accepts_focus ? focus.value || undefined : undefined,
+    })
     poll()
   } catch (e: any) {
     // 409 is the interesting one: something is already running. Nothing is
@@ -74,6 +82,7 @@ onMounted(() => {
 onUnmounted(() => timer && clearInterval(timer))
 
 const busy = computed(() => Boolean(current.value))
+const focusable = computed(() => commands.value.filter((c) => c.accepts_focus))
 </script>
 
 <template>
@@ -92,6 +101,21 @@ const busy = computed(() => Boolean(current.value))
         {{ command.label }}
         <span v-if="command.costs" class="ml-1 text-xs text-amber-700 dark:text-amber-500">$</span>
       </button>
+    </div>
+
+    <div class="mt-3">
+      <label class="text-xs text-neutral-500">
+        Steer this run (optional) — what to pay particular attention to. This is
+        yours, so the agent follows it, unlike research text which it judges.
+        Applies to
+        <span class="font-medium">{{ focusable.map((c) => c.label).join(' and ') }}</span>.
+      </label>
+      <textarea
+        v-model="focus"
+        rows="2"
+        class="mt-1 w-full rounded border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-900"
+        placeholder="We are considering moving storage off Postgres — say what depends on it."
+      />
     </div>
 
     <p class="mt-2 text-xs text-neutral-500">

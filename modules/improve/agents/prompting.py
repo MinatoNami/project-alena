@@ -96,3 +96,27 @@ def rejected_block(rejected: Optional[List[Dict[str, Any]]]) -> str:
         + "\n".join(lines)
         + "\n"
     )
+
+
+def operator_note(note: Optional[str]) -> str:
+    """A steer the operator typed, for this run.
+
+    Trusted, and deliberately unlike `observation_block`. Research text
+    arrives from an external agent reading the public internet and is framed
+    as data to be judged; this arrives from the person running ALENA, through
+    an interface only they can reach, and is an instruction to follow.
+
+    Getting that backwards in either direction would be a mistake. Treating
+    the operator's steer as data makes it useless; treating research as
+    instructions is the injection path the whole review is built to contain.
+    So they are separate functions with separate framing, and the note is
+    placed *before* the observation -- an instruction that follows the
+    untrusted block would be inside the region the block is quarantining.
+    """
+    if not (note or "").strip():
+        return ""
+    return (
+        "\nYour operator added this steer for this run. It is from them, not "
+        "from the research, and you should follow it:\n\n"
+        f"{note.strip()}\n"
+    )

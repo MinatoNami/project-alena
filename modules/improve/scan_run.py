@@ -73,6 +73,7 @@ def scan_repository(
     *,
     force: bool = False,
     summarize: bool = True,
+    note: Optional[str] = None,
     intelligence_root: Optional[Path] = None,
     conn=None,
 ) -> ScanOutcome:
@@ -140,6 +141,7 @@ def scan_repository(
             file_count=len(state.tracked_files),
             readme=_read_readme(repository.workspace, state.tracked_files),
             recent_subjects=[c.subject for c in state.recent_commits],
+            note=note,
         )
         previous_head = (previous or {}).get("head_sha")
         if previous_head and state.head_sha and previous_head != state.head_sha:

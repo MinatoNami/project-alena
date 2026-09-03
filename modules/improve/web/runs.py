@@ -37,6 +37,9 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 WRAPPER = REPO_ROOT / "scripts" / "alena_improve.sh"
 
 MAX_OUTPUT_LINES = 500
+# A steer, not an essay. Long enough for a paragraph of direction, short
+# enough that it cannot crowd out the prompt it is being added to.
+MAX_FOCUS_CHARS = 2000
 KEEP_RUNS = 20
 
 
@@ -55,18 +58,30 @@ class Command:
     # `implement` has any -- it acts on one recommendation rather than on
     # everything.
     parameters: tuple = ()
+    # Whether a free-text steer from the operator is passed to this command.
+    # Unlike research text it is trusted -- it arrives from the person running
+    # ALENA, through an interface only they can reach.
+    accepts_focus: bool = False
     # Writes to a repository. The UI puts these behind a confirmation, and
     # nothing in this class is what actually authorises the write: the
     # registry capability, the accepted status and the gateway grant are.
     writes: bool = False
 
-    def build(self, values: Dict[str, str]) -> List[str]:
+    def build(
+        self, values: Dict[str, str], focus: Optional[str] = None
+    ) -> List[str]:
         missing = [p for p in self.parameters if not values.get(p)]
         if missing:
-            raise ValueError(
-                f"{self.key} needs {', '.join(missing)}"
-            )
-        return [*self.args, *(str(values[p]) for p in self.parameters)]
+            raise ValueError(f"{self.key} needs {', '.join(missing)}")
+
+        args = [*self.args, *(str(values[p]) for p in self.parameters)]
+        if focus and (focus or "").strip():
+            if not self.accepts_focus:
+                raise ValueError(f"{self.key} does not take a focus")
+            # Passed as one argv element, never through a shell, so its
+            # content cannot become further arguments.
+            args += ["--focus", focus.strip()[:MAX_FOCUS_CHARS]]
+        return args
 
 
 COMMANDS: Dict[str, Command] = {
@@ -78,6 +93,7 @@ COMMANDS: Dict[str, Command] = {
             ["scan", "--all"],
             "Refresh git state, dependencies and TODOs. Unchanged repositories "
             "are skipped without reaching the model.",
+            accepts_focus=True,
         ),
         Command(
             "review",
@@ -85,6 +101,7 @@ COMMANDS: Dict[str, Command] = {
             ["review", "--all"],
             "Put each new research observation to Codex.",
             costs="one Codex call per new observation",
+            accepts_focus=True,
         ),
         Command(
             "recommend",
@@ -171,11 +188,16 @@ class Runner:
     def get(self, run_id: str) -> Optional[Run]:
         return next((r for r in self._runs if r.id == run_id), None)
 
-    def start(self, key: str, parameters: Optional[Dict[str, str]] = None) -> Run:
+    def start(
+        self,
+        key: str,
+        parameters: Optional[Dict[str, str]] = None,
+        focus: Optional[str] = None,
+    ) -> Run:
         command = COMMANDS.get(key)
         if command is None:
             raise KeyError(key)
-        args = command.build(parameters or {})
+        args = command.build(parameters or {}, focus)
 
         with self._lock:
             if self._current is not None and self._current.state == "running":
@@ -187,7 +209,7 @@ class Runner:
                 id=uuid.uuid4().hex[:12],
                 command=key,
                 label=command.label,
-                detail=" ".join(args[1:]) if command.parameters else None,
+                detail=" ".join(args[1:]) if len(args) > 1 else None,
                 started_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
             )
             self._current = run

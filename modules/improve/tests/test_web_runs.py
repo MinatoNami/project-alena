@@ -409,3 +409,62 @@ def test_implement_still_needs_the_dashboard_header(client, implementable):
     )
 
     assert response.status_code == 403
+
+
+# -- steering a run --------------------------------------------------------
+
+
+def test_a_focus_is_appended_as_one_argument():
+    """One argv element, never a shell, so its content cannot become further
+    arguments."""
+    args = COMMANDS["scan"].build({}, "look at; rm -rf / --upload-pack=x")
+
+    assert args[-2] == "--focus"
+    assert args[-1] == "look at; rm -rf / --upload-pack=x"
+    assert len(args) == 4
+
+
+def test_a_focus_is_truncated():
+    """A steer, not an essay -- it must not crowd out the prompt."""
+    args = COMMANDS["scan"].build({}, "x" * 5000)
+
+    assert len(args[-1]) == runs_module.MAX_FOCUS_CHARS
+
+
+def test_an_empty_focus_adds_nothing():
+    assert COMMANDS["scan"].build({}, "   ") == ["scan", "--all"]
+    assert COMMANDS["scan"].build({}, None) == ["scan", "--all"]
+
+
+def test_a_command_that_does_not_take_a_focus_refuses_one():
+    """Refused rather than silently dropped: a steer that vanishes is worse
+    than one that is rejected."""
+    with pytest.raises(ValueError, match="does not take a focus"):
+        COMMANDS["portfolio"].build({}, "pay attention to this")
+
+
+def test_only_the_analysis_commands_take_a_focus():
+    steerable = {k for k, c in COMMANDS.items() if c.accepts_focus}
+    assert steerable == {"scan", "review"}
+
+
+def test_the_api_passes_a_focus_through(client):
+    response = client.post(
+        "/api/runs",
+        json={"command": "scan", "focus": "watch the sharing model"},
+        headers=DASHBOARD,
+    )
+
+    assert response.status_code == 200
+    assert "watch the sharing model" in response.json()["detail"]
+
+
+def test_the_api_refuses_a_focus_where_it_does_not_apply(client):
+    response = client.post(
+        "/api/runs",
+        json={"command": "portfolio", "focus": "something"},
+        headers=DASHBOARD,
+    )
+
+    assert response.status_code == 400
+    assert "does not take a focus" in response.json()["detail"]

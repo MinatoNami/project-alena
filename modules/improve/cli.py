@@ -64,7 +64,10 @@ def cmd_scan(args: argparse.Namespace) -> int:
     for repository in targets:
         try:
             outcome = scan_repository(
-                repository, force=args.force, summarize=not args.no_llm
+                repository,
+                force=args.force,
+                summarize=not args.no_llm,
+                note=args.focus,
             )
         except RegistryError as exc:
             outcome = ScanOutcome(repository.id, ok=False, error=str(exc))
@@ -209,7 +212,10 @@ def cmd_review(args: argparse.Namespace) -> int:
                     print(f"  would escalate: {line}")
         else:
             run = review_repository(
-                repository, limit=args.limit, retry_failed=args.retry_failed
+                repository,
+                limit=args.limit,
+                retry_failed=args.retry_failed,
+                note=args.focus,
             )
             print(run.describe())
         failed += len(run.failed)
@@ -653,6 +659,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Skip model summaries; collect structure only",
     )
+    scan.add_argument("--focus", help="A steer for this run: what to pay particular attention to. Yours, so it is followed rather than evaluated.")
     scan.set_defaults(func=cmd_scan)
 
     repos = sub.add_parser("repos", parents=[common], help="List declared repositories")
@@ -708,6 +715,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="With --agent claude: show what would escalate, and why, "
         "without calling the routine",
     )
+    review.add_argument("--focus", help="A steer for this run: what to pay particular attention to. Yours, so it is followed rather than evaluated.")
     review.add_argument(
         "--retry-failed",
         action="store_true",

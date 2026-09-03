@@ -64,9 +64,15 @@ def summarize_repository(
     file_count: int,
     readme: Optional[str] = None,
     recent_subjects: Optional[list] = None,
+    note: Optional[str] = None,
     client: Optional[LLMChatClient] = None,
 ) -> Optional[str]:
-    """A short profile of what this repository is."""
+    """A short profile of what this repository is.
+
+    `note` is a steer the operator typed for this run -- "we are considering
+    moving storage off Postgres, say what depends on it". It comes from the
+    person running ALENA, so it is an instruction, not something to evaluate.
+    """
     top_languages = ", ".join(f"{k} ({v} files)" for k, v in list(languages.items())[:6])
     top_dependencies = ", ".join(d["name"] for d in dependencies[:40])
     commits = "\n".join(f"- {s}" for s in (recent_subjects or [])[:15])
@@ -85,7 +91,8 @@ README (truncated):
 {(readme or "(no README found)")[:4000]}
 
 Cover: what the project does, its architecture in broad strokes, and the
-technologies it commits to. State only what the evidence above supports."""
+technologies it commits to. State only what the evidence above supports.
+{f"{chr(10)}Your operator asked you to pay particular attention to this:{chr(10)}{note.strip()}" if (note or "").strip() else ""}"""
     return _ask(prompt, _REPO_SYSTEM, client)
 
 

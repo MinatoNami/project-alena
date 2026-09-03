@@ -57,8 +57,11 @@ repositories:
       research: true
       analyze: true
       plan: true
-      modify: false
-      create_branch: false
+      # Enabled deliberately: the action agent may create a branch here and
+      # commit to it. It still cannot push or open a pull request -- a grant
+      # is capped at repository_write, and those are remote_write.
+      modify: true
+      create_branch: true
       create_pr: false
       merge: false
     agents:

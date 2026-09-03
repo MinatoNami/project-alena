@@ -183,6 +183,26 @@ endpoint cannot be reached, and the endpoint answered in a shape the client
 cannot read. Finding out which during a Thursday 02:00 escalation is the worst
 available time.
 
+### Steering a run
+
+A manual scan or review takes a free-text steer — from the dashboard, or
+`--focus` on the CLI:
+
+```bash
+scripts/alena_improve.sh review --all --focus "only the storage layer"
+```
+
+It is deliberately handled the opposite way to research text. Research arrives
+from an external agent reading the public internet and is framed as data to be
+judged; a steer arrives from the person running ALENA, through an interface
+only they can reach, and is framed as an instruction to follow. It is also
+placed *before* the observation block, because an instruction inside the
+quarantined region would be quarantined along with it.
+
+Only `scan` and `review` take one. A command that has no use for a steer
+refuses it rather than dropping it silently — a steer that vanishes is worse
+than one that is rejected.
+
 ### Research is untrusted input
 
 The research document is written by an external agent reading the public

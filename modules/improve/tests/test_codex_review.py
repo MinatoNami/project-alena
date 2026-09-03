@@ -177,3 +177,48 @@ async def test_out_of_range_numbers_from_the_model_are_clamped(repository):
 
     assert result.fit == 1.0
     assert result.risk == 0.0
+
+
+# -- the operator's steer, which is trusted --------------------------------
+
+
+def test_an_operator_note_reaches_the_prompt():
+    prompt = build_prompt("LumaIndex", OBSERVATION, note="Only security implications.")
+
+    assert "Only security implications." in prompt
+
+
+def test_the_note_is_framed_as_an_instruction_not_as_data():
+    """Research is judged; the operator's steer is followed. Getting that
+    backwards makes the steer useless in one direction and opens the injection
+    path in the other."""
+    prompt = build_prompt("LumaIndex", OBSERVATION, note="Focus on migrations.")
+
+    assert "from them, not" in prompt
+    assert "you should follow it" in prompt
+
+
+def test_the_note_sits_outside_the_untrusted_block():
+    """An instruction inside the quarantined region would be quarantined."""
+    prompt = build_prompt("LumaIndex", OBSERVATION, note="Focus on migrations.")
+
+    assert prompt.index("Focus on migrations.") < prompt.index("<<<RESEARCH_OBSERVATION")
+
+
+def test_no_note_leaves_the_prompt_unchanged():
+    assert "operator added" not in build_prompt("LumaIndex", OBSERVATION)
+
+
+@pytest.mark.asyncio
+async def test_the_note_is_passed_when_reviewing(repository):
+    seen = {}
+
+    async def executor(server, tool, arguments, **kwargs):
+        seen["question"] = arguments["question"]
+        return codex_result({"verdict": "supported"})
+
+    await review_observation(
+        repository, OBSERVATION, note="Only the storage layer.", executor=executor
+    )
+
+    assert "Only the storage layer." in seen["question"]

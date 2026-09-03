@@ -85,6 +85,7 @@ async def review_repository_async(
     *,
     limit: Optional[int] = None,
     retry_failed: bool = False,
+    note: Optional[str] = None,
     executor=None,
     conn=None,
 ) -> ReviewRun:
@@ -111,6 +112,7 @@ async def review_repository_async(
             observation,
             context=context,
             rejected=rejected,
+            note=note,
             executor=executor,
         )
         record_review(

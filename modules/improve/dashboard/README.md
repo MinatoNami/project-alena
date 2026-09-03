@@ -71,6 +71,17 @@ Runs are held in memory, so a restart forgets them, and the scheduled jobs run
 the same commands without appearing in the list. It is a view of what you
 started from here, not a history of everything that ran.
 
+## Steering a run
+
+The run panel has a text box. What you type is appended to the analysis as
+`--focus`, and reaches the agent framed as an instruction from you — not as
+material to evaluate, which is how research text is framed. That difference is
+the point: treating your steer as data makes it useless, and treating research
+as instructions is the injection path the review exists to contain.
+
+It applies to Scan and Review. Buttons that have no use for it refuse it
+rather than dropping it, so a steer never silently disappears.
+
 ## Implementing
 
 There is a button, on the accepted recommendation itself rather than in the

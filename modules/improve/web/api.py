@@ -123,6 +123,11 @@ class RunRequest(BaseModel):
     command: str = Field(..., description="A key from /api/commands")
     repository_id: Optional[str] = None
     recommendation_id: Optional[int] = None
+    focus: Optional[str] = Field(
+        None,
+        description="A steer for this run. From the operator, so it is "
+        "followed rather than evaluated.",
+    )
 
 
 class DecisionRequest(BaseModel):
@@ -329,6 +334,7 @@ def create_app() -> FastAPI:
                 "costs": c.costs,
                 "parameters": list(c.parameters),
                 "writes": c.writes,
+                "accepts_focus": c.accepts_focus,
             }
             for c in COMMANDS.values()
         ]
@@ -360,7 +366,7 @@ def create_app() -> FastAPI:
             _check_implementable(payload)
 
         try:
-            run = get_runner().start(payload.command, parameters)
+            run = get_runner().start(payload.command, parameters, payload.focus)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
         except KeyError:
