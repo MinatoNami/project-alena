@@ -175,3 +175,344 @@ def rejected_recommendations(
         (repository_id,),
     )
     return [dict(row) for row in rows]
+
+# ---------------------------------------------------------------------------
+# Research, observations and reviews
+# ---------------------------------------------------------------------------
+
+
+def recommendations_by_status(
+    repository_id: str, conn: Optional[sqlite3.Connection] = None
+) -> Dict[str, List[Dict[str, Any]]]:
+    """Prior recommendations, grouped for the context package."""
+    conn = conn or get_connection()
+    rows = [
+        dict(row)
+        for row in conn.execute(
+            "SELECT * FROM recommendations WHERE repository_id = ?"
+            " ORDER BY updated_at DESC",
+            (repository_id,),
+        )
+    ]
+    return {
+        "all": rows,
+        "accepted": [r for r in rows if r["status"] == "accepted"],
+        "rejected": [r for r in rows if r["status"] == "rejected"],
+    }
+
+
+def priors_for_dedup(
+    repository_id: str, conn: Optional[sqlite3.Connection] = None
+) -> List[Any]:
+    """Everything already proposed, as dedup wants it.
+
+    Both decided recommendations and observations still waiting for review.
+    Leaving the pending ones out would let the same idea arrive in two research
+    documents and be reviewed twice before anything had a chance to notice.
+    """
+    from .recommend.dedup import PriorRecommendation
+
+    conn = conn or get_connection()
+    priors = [
+        PriorRecommendation(
+            id=row["id"],
+            title=row["title"],
+            normalized_title=row["normalized_title"],
+            status=row["status"],
+            reason=row["reason"],
+            body=row["body"],
+            embedding=row["embedding"],
+            kind="recommendation",
+        )
+        for row in conn.execute(
+            "SELECT id, title, normalized_title, status, reason, body, embedding"
+            " FROM recommendations WHERE repository_id = ?",
+            (repository_id,),
+        )
+    ]
+    priors += [
+        PriorRecommendation(
+            id=row["id"],
+            title=row["title"],
+            normalized_title=row["normalized_title"],
+            status="awaiting review",
+            reason=None,
+            body=row["body"],
+            embedding=row["embedding"],
+            kind="observation",
+        )
+        for row in conn.execute(
+            "SELECT o.id, o.title, o.normalized_title, o.body, o.embedding"
+            " FROM observations o"
+            " WHERE o.repository_id = ? AND o.duplicate_reason IS NULL"
+            " AND NOT EXISTS (SELECT 1 FROM recommendations r"
+            "                 WHERE r.observation_id = o.id)",
+            (repository_id,),
+        )
+    ]
+    return priors
+
+
+def record_research(
+    *,
+    repository_id: str,
+    source: str,
+    content: str,
+    content_hash: str,
+    title: Optional[str] = None,
+    document_date: Optional[str] = None,
+    path: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> tuple[int, bool]:
+    """Store a research document. Returns (id, created).
+
+    Re-ingesting the same file is a no-op rather than an error: a watched drop
+    directory will hand us the same document more than once.
+    """
+    conn = conn or get_connection()
+    existing = conn.execute(
+        "SELECT id FROM research_documents WHERE repository_id = ? AND content_hash = ?",
+        (repository_id, content_hash),
+    ).fetchone()
+    if existing is not None:
+        return int(existing["id"]), False
+
+    cursor = conn.execute(
+        """
+        INSERT INTO research_documents
+            (repository_id, created_at, source, title, document_date, path,
+             content, content_hash)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            repository_id,
+            utcnow(),
+            source,
+            title,
+            document_date,
+            path,
+            content,
+            content_hash,
+        ),
+    )
+    conn.commit()
+    return int(cursor.lastrowid), True
+
+
+def record_observation(
+    *,
+    research_id: int,
+    repository_id: str,
+    title: str,
+    normalized_title: str,
+    body: Optional[str],
+    evidence: Optional[str],
+    duplicate_of: Optional[int] = None,
+    duplicate_reason: Optional[str] = None,
+    similarity: float = 0.0,
+    embedding: Optional[bytes] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> int:
+    conn = conn or get_connection()
+    cursor = conn.execute(
+        """
+        INSERT INTO observations
+            (research_id, repository_id, created_at, title, normalized_title,
+             body, evidence, duplicate_of, duplicate_reason, similarity, embedding)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            research_id,
+            repository_id,
+            utcnow(),
+            title,
+            normalized_title,
+            body,
+            evidence,
+            duplicate_of,
+            duplicate_reason,
+            similarity,
+            embedding,
+        ),
+    )
+    conn.commit()
+    return int(cursor.lastrowid)
+
+
+def observations_for(
+    repository_id: str,
+    *,
+    include_duplicates: bool = False,
+    unreviewed_only: bool = False,
+    conn: Optional[sqlite3.Connection] = None,
+) -> List[Dict[str, Any]]:
+    conn = conn or get_connection()
+    sql = ["SELECT o.* FROM observations o WHERE o.repository_id = ?"]
+    if not include_duplicates:
+        sql.append("AND o.duplicate_of IS NULL AND o.duplicate_reason IS NULL")
+    if unreviewed_only:
+        sql.append(
+            "AND NOT EXISTS (SELECT 1 FROM engineering_reviews r"
+            " WHERE r.observation_id = o.id)"
+        )
+    sql.append("ORDER BY o.id")
+    return [dict(row) for row in conn.execute(" ".join(sql), (repository_id,))]
+
+
+def record_review(
+    *,
+    observation_id: int,
+    repository_id: str,
+    agent: str,
+    verdict: str,
+    confidence: Optional[float] = None,
+    fit: Optional[float] = None,
+    cost: Optional[float] = None,
+    risk: Optional[float] = None,
+    body: Optional[str] = None,
+    path: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> int:
+    conn = conn or get_connection()
+    cursor = conn.execute(
+        """
+        INSERT INTO engineering_reviews
+            (observation_id, repository_id, created_at, agent, verdict,
+             confidence, fit, cost, risk, body, path)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            observation_id,
+            repository_id,
+            utcnow(),
+            agent,
+            verdict,
+            confidence,
+            fit,
+            cost,
+            risk,
+            body,
+            path,
+        ),
+    )
+    conn.commit()
+    return int(cursor.lastrowid)
+
+
+def reviews_for(
+    observation_id: int, conn: Optional[sqlite3.Connection] = None
+) -> List[Dict[str, Any]]:
+    conn = conn or get_connection()
+    return [
+        dict(row)
+        for row in conn.execute(
+            "SELECT * FROM engineering_reviews WHERE observation_id = ? ORDER BY id",
+            (observation_id,),
+        )
+    ]
+
+
+def upsert_recommendation(
+    *,
+    repository_id: str,
+    observation_id: int,
+    title: str,
+    normalized_title: str,
+    body: str,
+    score: Optional[float] = None,
+    confidence: Optional[float] = None,
+    estimated_effort: Optional[str] = None,
+    score_breakdown: Optional[dict] = None,
+    embedding: Optional[bytes] = None,
+    status: str = "recommended",
+    reason: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> int:
+    """Write the recommendation for an observation, replacing any earlier one.
+
+    Keyed on the observation rather than the title: re-running synthesis after
+    a better review should update the recommendation, not add a second one.
+    A human decision already recorded against it is left alone.
+    """
+    conn = conn or get_connection()
+    now = utcnow()
+    existing = conn.execute(
+        "SELECT id, status FROM recommendations WHERE observation_id = ?",
+        (observation_id,),
+    ).fetchone()
+
+    if existing is not None:
+        if existing["status"] != "recommended":
+            # A human has decided on this one; synthesis does not overwrite it.
+            return int(existing["id"])
+        conn.execute(
+            "UPDATE recommendations SET updated_at = ?, title = ?,"
+            " normalized_title = ?, body = ?, score = ?, confidence = ?,"
+            " estimated_effort = ?, score_breakdown = ?, embedding = ?,"
+            " status = ?, reason = ? WHERE id = ?",
+            (
+                now,
+                title,
+                normalized_title,
+                body,
+                score,
+                confidence,
+                estimated_effort,
+                _json(score_breakdown) if score_breakdown else None,
+                embedding,
+                status,
+                reason,
+                existing["id"],
+            ),
+        )
+        conn.commit()
+        return int(existing["id"])
+
+    cursor = conn.execute(
+        """
+        INSERT INTO recommendations
+            (repository_id, created_at, updated_at, title, normalized_title,
+             body, status, reason, score, confidence, estimated_effort,
+             score_breakdown, embedding, observation_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            repository_id,
+            now,
+            now,
+            title,
+            normalized_title,
+            body,
+            status,
+            reason,
+            score,
+            confidence,
+            estimated_effort,
+            _json(score_breakdown) if score_breakdown else None,
+            embedding,
+            observation_id,
+        ),
+    )
+    conn.commit()
+    return int(cursor.lastrowid)
+
+
+def recommendations_for(
+    repository_id: str,
+    status: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> List[Dict[str, Any]]:
+    conn = conn or get_connection()
+    if status:
+        rows = conn.execute(
+            "SELECT * FROM recommendations WHERE repository_id = ? AND status = ?"
+            " ORDER BY score DESC, id",
+            (repository_id, status),
+        )
+    else:
+        rows = conn.execute(
+            "SELECT * FROM recommendations WHERE repository_id = ?"
+            " ORDER BY score DESC, id",
+            (repository_id,),
+        )
+    return [dict(row) for row in rows]

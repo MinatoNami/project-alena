@@ -128,3 +128,58 @@ def test_audit_reads_the_gateway_log(registry_file, capsys):
 
     assert run("audit", "--registry", registry_file) == 0
     assert "codex_analyze" in capsys.readouterr().out
+
+
+# --- Phase 2 commands ------------------------------------------------------
+
+
+RESEARCH_DOC = """# Research: sample
+
+Repository: sample
+Date: 2026-09-03
+Source: chatgpt-work
+
+## Local OCR is practical
+
+OCR runs on consumer hardware.
+
+Evidence: https://a.example
+"""
+
+
+@pytest.fixture
+def research_file(tmp_path):
+    path = tmp_path / "drop" / "sample-2026-09-03.md"
+    path.parent.mkdir()
+    path.write_text(RESEARCH_DOC)
+    return path
+
+
+def test_context_writes_the_package(registry_file, capsys):
+    assert run("context", "sample", "--registry", registry_file) == 0
+    assert ".context" in capsys.readouterr().out
+
+
+def test_ingest_research_reports_what_it_took(registry_file, research_file, capsys):
+    assert run("ingest-research", "sample", str(research_file), "--registry", registry_file) == 0
+    assert "1 observation" in capsys.readouterr().out
+
+
+def test_ingest_research_from_a_drop_directory(registry_file, research_file, capsys):
+    assert run(
+        "ingest-research", "sample", "--from-dir", str(research_file.parent),
+        "--registry", registry_file,
+    ) == 0
+    assert "1 observation" in capsys.readouterr().out
+
+
+def test_ingest_research_reports_a_missing_file(registry_file, tmp_path, capsys):
+    assert run("ingest-research", "sample", str(tmp_path / "nope.md"), "--registry", registry_file) == 1
+    assert "no such file" in capsys.readouterr().out
+
+
+def test_recommend_with_nothing_reviewed_writes_an_empty_report(registry_file, capsys):
+    assert run("recommend", "sample", "--registry", registry_file) == 0
+    out = capsys.readouterr().out
+    assert "0 recommendation(s)" in out
+    assert "latest.md" in out

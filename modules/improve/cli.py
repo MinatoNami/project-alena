@@ -10,11 +10,15 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 from typing import List, Optional, Sequence
 
 from .artifacts import ensure_layout, intelligence_dir
+from .context_package import build_context_package
 from .persistence import latest_scan
 from .registry import RegistryError, Repository, load_registry
+from .research import ingest_file, research_files
+from .review_run import recommend_repository, review_repository
 from .scan_run import ScanOutcome, scan_repository
 from .wiring import install_gateway
 
@@ -138,6 +142,64 @@ def cmd_where(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_context(args: argparse.Namespace) -> int:
+    registry = load_registry(args.registry)
+    ensure_layout()
+    for repository in _targets(registry, args.repository, args.all):
+        directory = build_context_package(repository)
+        print(f"{repository.id}: {directory}")
+    return 0
+
+
+def cmd_ingest_research(args: argparse.Namespace) -> int:
+    registry = load_registry(args.registry)
+    ensure_layout()
+    repository = registry.resolve(args.repository, "research")
+
+    if args.from_dir:
+        paths = research_files(Path(args.from_dir))
+        if not paths:
+            print(f"No markdown in {args.from_dir}")
+            return 0
+    else:
+        paths = [Path(args.path)]
+
+    failed = 0
+    for path in paths:
+        result = ingest_file(repository, path, source=args.source)
+        print(f"{path.name}: {result.describe()}")
+        for title in result.duplicates:
+            print(f"  skipped: {title}")
+        if not result.ok:
+            failed += 1
+    return 1 if failed else 0
+
+
+def cmd_review(args: argparse.Namespace) -> int:
+    registry = load_registry(args.registry)
+    install_gateway(registry, args.policy)
+    ensure_layout()
+
+    failed = 0
+    for repository in _targets(registry, args.repository, args.all):
+        run = review_repository(repository, limit=args.limit)
+        print(run.describe())
+        failed += len(run.failed)
+    return 1 if failed else 0
+
+
+def cmd_recommend(args: argparse.Namespace) -> int:
+    registry = load_registry(args.registry)
+    ensure_layout()
+
+    for repository in _targets(registry, args.repository, args.all):
+        run = recommend_repository(repository)
+        print(run.describe())
+        for path in run.written:
+            print(f"  {path}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     # Config paths are accepted both before and after the subcommand: the
     # natural thing to type is `scan --all --registry x`, but the global form
@@ -186,6 +248,39 @@ def build_parser() -> argparse.ArgumentParser:
 
     where = sub.add_parser("where", parents=[common], help="Show which files and paths are in use")
     where.set_defaults(func=cmd_where)
+
+    context = sub.add_parser(
+        "context", parents=[common], help="Write the .context/ package for agents"
+    )
+    context.add_argument("repository", nargs="?")
+    context.add_argument("--all", action="store_true")
+    context.set_defaults(func=cmd_context)
+
+    ingest = sub.add_parser(
+        "ingest-research",
+        parents=[common],
+        help="Ingest an external research document",
+    )
+    ingest.add_argument("repository")
+    ingest.add_argument("path", nargs="?", help="Markdown file to ingest")
+    ingest.add_argument("--from-dir", help="Ingest every markdown file in a directory")
+    ingest.add_argument("--source", default="chatgpt-work")
+    ingest.set_defaults(func=cmd_ingest_research)
+
+    review = sub.add_parser(
+        "review", parents=[common], help="Run engineering review over new observations"
+    )
+    review.add_argument("repository", nargs="?")
+    review.add_argument("--all", action="store_true")
+    review.add_argument("--limit", type=int, help="Review at most this many")
+    review.set_defaults(func=cmd_review)
+
+    recommend = sub.add_parser(
+        "recommend", parents=[common], help="Score reviews and write the report"
+    )
+    recommend.add_argument("repository", nargs="?")
+    recommend.add_argument("--all", action="store_true")
+    recommend.set_defaults(func=cmd_recommend)
 
     return parser
 
