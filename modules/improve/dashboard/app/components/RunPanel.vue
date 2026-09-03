@@ -1,7 +1,14 @@
 <script setup lang="ts">
 const { get, post } = useAlena()
 
-type Command = { key: string; label: string; description: string; costs: string | null }
+type Command = {
+  key: string
+  label: string
+  description: string
+  costs: string | null
+  parameters: string[]
+  writes: boolean
+}
 type Run = {
   id: string
   command: string
@@ -15,7 +22,11 @@ type Run = {
 
 const emit = defineEmits<{ finished: [] }>()
 
-const { data: commands } = await useAsyncData('commands', () => get<Command[]>('/api/commands'))
+// Commands that act on the whole portfolio. `implement` takes a specific
+// recommendation, so it belongs on that recommendation, not in a row of
+// buttons where a stray click reaches it.
+const { data: all } = await useAsyncData('commands', () => get<Command[]>('/api/commands'))
+const commands = computed(() => (all.value ?? []).filter((c) => !c.parameters.length))
 const runs = ref<Run[]>([])
 const current = ref<Run | null>(null)
 const active = ref<Run | null>(null)

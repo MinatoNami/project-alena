@@ -71,16 +71,37 @@ Runs are held in memory, so a restart forgets them, and the scheduled jobs run
 the same commands without appearing in the list. It is a view of what you
 started from here, not a history of everything that ran.
 
-## Implementing is not something a browser does
+## Implementing
 
-There is no implement endpoint, and no button. It writes to a repository,
-takes minutes, and is the thing most worth watching while it happens.
-`ingest-research` is absent too — it needs a file path, and a browser should
-not be choosing one. Accepting in the dashboard prints the command instead:
+There is a button, on the accepted recommendation itself rather than in the
+row of portfolio-wide buttons — a command that acts on one repository does
+not belong somewhere a stray click reaches it. It asks for confirmation, and
+the confirmation says which repository is about to be written to.
 
-```
-alena-improve implement luma-index 3
-```
+Four things have to be true before anything is written, and **none of them
+lives in the dashboard**:
+
+| Gate | Where it lives |
+|---|---|
+| `modify` and `create_branch` for that repository | `config/repositories.yaml` |
+| The recommendation is `accepted` | a recorded human decision |
+| The working tree is completely clean | the action agent's pre-flight |
+| A scoped, expiring write grant | the Tool Gateway |
+
+The API checks the first two itself so a mistake in the browser is an
+immediate readable refusal rather than something that surfaces in log output
+forty seconds later. The CLI checks them all again, because a scheduled or
+terminal run never passes through here.
+
+All four registered repositories are read-only today, so the button refuses
+with a message saying exactly which flag to set and where. The dashboard
+cannot set it.
+
+Nothing is pushed and nothing is merged. What comes back is a branch, a
+commit, the tests it could run, and an independent review of the diff.
+
+`ingest-research` has no button — it needs a file path, and a browser should
+not be choosing one.
 
 ## Pages
 

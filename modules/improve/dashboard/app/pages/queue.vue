@@ -2,6 +2,56 @@
 const { get, post } = useAlena()
 const { data, error, refresh } = await useAsyncData('queue', () => get<Recommendation[]>('/api/queue'))
 
+type Run = { id: string; state: string; exit_code: number | null; output?: string[] }
+
+// Accepted but not yet implemented. Fetched per repository because the queue
+// endpoint is only what awaits a decision.
+const { data: repositories } = await useAsyncData('repos-for-accepted', () =>
+  get<{ id: string; name: string; capabilities: Record<string, boolean> }[]>('/api/repositories'),
+)
+const { data: acceptedRows, refresh: refreshAccepted } = await useAsyncData('accepted', async () => {
+  const out: (Recommendation & { writable: boolean })[] = []
+  for (const repo of repositories.value ?? []) {
+    const rows = await get<Recommendation[]>(
+      `/api/repositories/${repo.id}/recommendations?status=accepted`,
+    )
+    for (const row of rows) {
+      out.push({ ...row, repository_name: repo.name, writable: Boolean(repo.capabilities?.modify) })
+    }
+  }
+  return out
+})
+
+const confirming = ref<number | null>(null)
+const implementing = ref<Run | null>(null)
+const implementFailure = ref<string | null>(null)
+let implementTimer: ReturnType<typeof setInterval> | null = null
+
+async function implement(row: Recommendation) {
+  implementFailure.value = null
+  confirming.value = null
+  try {
+    implementing.value = await post<Run>('/api/runs', {
+      command: 'implement',
+      repository_id: row.repository_id,
+      recommendation_id: row.id,
+    })
+    implementTimer = setInterval(async () => {
+      const detail = await get<Run>(`/api/runs/${implementing.value!.id}`)
+      implementing.value = detail
+      if (detail.state !== 'running') {
+        clearInterval(implementTimer!)
+        implementTimer = null
+        await refreshAccepted()
+      }
+    }, 2000)
+  } catch (e: any) {
+    implementFailure.value = e?.data?.detail ?? e?.message ?? 'Could not start.'
+  }
+}
+
+onUnmounted(() => implementTimer && clearInterval(implementTimer))
+
 const expanded = ref<number | null>(null)
 const rejecting = ref<number | null>(null)
 const reason = ref('')
@@ -73,9 +123,84 @@ const priorityClass = (p?: string) =>
       Cannot reach the API.
     </div>
 
-    <div v-else-if="!data?.length" class="text-sm text-neutral-500">Nothing is awaiting a decision.</div>
+    <section v-if="acceptedRows?.length" class="mb-10">
+      <h2 class="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+        Accepted, awaiting implementation
+      </h2>
+      <p class="mt-1 text-xs text-neutral-500">
+        Implementing creates a branch, has Codex make the change, runs the tests and has the diff
+        independently reviewed. Nothing is pushed and nothing is merged.
+      </p>
 
-    <div v-else class="space-y-6">
+      <p
+        v-if="implementFailure"
+        class="mt-3 rounded border border-neutral-300 bg-neutral-100 p-3 text-sm dark:border-neutral-700 dark:bg-neutral-900"
+      >{{ implementFailure }}</p>
+
+      <ul class="mt-3 space-y-3">
+        <li
+          v-for="row in acceptedRows"
+          :key="row.id"
+          class="rounded border border-neutral-200 px-4 py-3 dark:border-neutral-800"
+        >
+          <div class="flex flex-wrap items-baseline justify-between gap-2">
+            <span class="text-sm">{{ row.title }}</span>
+            <span class="text-xs text-neutral-500">{{ row.repository_name }}</span>
+          </div>
+
+          <p v-if="!row.writable" class="mt-2 text-xs text-neutral-500">
+            {{ row.repository_id }} is read-only. Enable <code class="font-mono">modify</code> and
+            <code class="font-mono">create_branch</code> for it in
+            <code class="font-mono">config/repositories.yaml</code> first — nothing here can.
+          </p>
+
+          <div v-else class="mt-3">
+            <button
+              v-if="confirming !== row.id"
+              class="rounded border border-neutral-300 px-3 py-1.5 text-sm disabled:opacity-40 dark:border-neutral-700"
+              :disabled="implementing?.state === 'running'"
+              @click="confirming = row.id"
+            >Implement…</button>
+
+            <div v-else class="flex flex-wrap items-center gap-3">
+              <span class="text-xs text-amber-700 dark:text-amber-500">
+                This writes a branch to {{ row.repository_id }} and spends a Codex session.
+              </span>
+              <button
+                class="rounded bg-neutral-900 px-3 py-1.5 text-sm text-white dark:bg-neutral-100 dark:text-neutral-900"
+                @click="implement(row)"
+              >Yes, implement</button>
+              <button class="text-xs text-neutral-500 underline" @click="confirming = null">Cancel</button>
+            </div>
+          </div>
+        </li>
+      </ul>
+
+      <div v-if="implementing" class="mt-4 rounded border border-neutral-200 dark:border-neutral-800">
+        <div class="flex items-baseline justify-between border-b border-neutral-200 px-4 py-2 text-sm dark:border-neutral-800">
+          <span class="font-medium">Implementing</span>
+          <span
+            class="text-xs"
+            :class="{
+              'text-neutral-500': implementing.state === 'running',
+              'text-emerald-700 dark:text-emerald-500': implementing.state === 'finished',
+              'text-red-700 dark:text-red-400': implementing.state === 'failed',
+            }"
+          >{{ implementing.state === 'running' ? 'running… this takes a few minutes' : implementing.state }}</span>
+        </div>
+        <pre
+          v-if="implementing.output?.length"
+          class="max-h-64 overflow-auto px-4 py-3 font-mono text-xs leading-relaxed text-neutral-700 dark:text-neutral-300"
+        >{{ implementing.output.join('\n') }}</pre>
+        <p v-else class="px-4 py-3 text-xs text-neutral-500">No output yet.</p>
+      </div>
+    </section>
+
+    <div v-if="!data?.length && !acceptedRows?.length" class="text-sm text-neutral-500">
+      Nothing is awaiting a decision.
+    </div>
+
+    <div v-if="data?.length" class="space-y-6">
       <p v-if="failure" class="rounded border border-red-300 bg-red-50 p-3 text-sm dark:border-red-900 dark:bg-red-950">
         {{ failure }}
       </p>

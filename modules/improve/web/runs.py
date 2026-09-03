@@ -51,6 +51,22 @@ class Command:
     # Whether it spends anything beyond local compute. Shown in the UI: a
     # button that quietly costs Codex quota is a button people regret.
     costs: Optional[str] = None
+    # Named arguments the caller must supply, appended in this order. Only
+    # `implement` has any -- it acts on one recommendation rather than on
+    # everything.
+    parameters: tuple = ()
+    # Writes to a repository. The UI puts these behind a confirmation, and
+    # nothing in this class is what actually authorises the write: the
+    # registry capability, the accepted status and the gateway grant are.
+    writes: bool = False
+
+    def build(self, values: Dict[str, str]) -> List[str]:
+        missing = [p for p in self.parameters if not values.get(p)]
+        if missing:
+            raise ValueError(
+                f"{self.key} needs {', '.join(missing)}"
+            )
+        return [*self.args, *(str(values[p]) for p in self.parameters)]
 
 
 COMMANDS: Dict[str, Command] = {
@@ -88,12 +104,22 @@ COMMANDS: Dict[str, Command] = {
             ["portfolio"],
             "Recompute shared technology and divergent pins across repositories.",
         ),
+        Command(
+            "implement",
+            "Implement",
+            ["implement"],
+            "Create a branch, have Codex make the change, run the tests, and "
+            "have the diff independently reviewed. Nothing is pushed and "
+            "nothing is merged.",
+            costs="a Codex session, and a branch in the repository",
+            parameters=("repository_id", "recommendation_id"),
+            writes=True,
+        ),
     ]
 }
 
-# Deliberately absent: `implement`. It writes to a repository, and it is the
-# thing most worth watching while it happens. `ingest-research` is absent too
-# -- it needs a file path, and a browser should not be choosing one.
+# `ingest-research` is deliberately absent: it needs a file path, and a
+# browser should not be choosing one.
 
 
 @dataclass
@@ -102,6 +128,7 @@ class Run:
     command: str
     label: str
     started_at: str
+    detail: Optional[str] = None
     state: str = "running"  # running | finished | failed
     exit_code: Optional[int] = None
     finished_at: Optional[str] = None
@@ -112,6 +139,7 @@ class Run:
             "id": self.id,
             "command": self.command,
             "label": self.label,
+            "detail": self.detail,
             "state": self.state,
             "exit_code": self.exit_code,
             "started_at": self.started_at,
@@ -143,10 +171,11 @@ class Runner:
     def get(self, run_id: str) -> Optional[Run]:
         return next((r for r in self._runs if r.id == run_id), None)
 
-    def start(self, key: str) -> Run:
+    def start(self, key: str, parameters: Optional[Dict[str, str]] = None) -> Run:
         command = COMMANDS.get(key)
         if command is None:
             raise KeyError(key)
+        args = command.build(parameters or {})
 
         with self._lock:
             if self._current is not None and self._current.state == "running":
@@ -158,6 +187,7 @@ class Runner:
                 id=uuid.uuid4().hex[:12],
                 command=key,
                 label=command.label,
+                detail=" ".join(args[1:]) if command.parameters else None,
                 started_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
             )
             self._current = run
@@ -165,15 +195,15 @@ class Runner:
             del self._runs[:-KEEP_RUNS]
 
         threading.Thread(
-            target=self._execute, args=(run, command), daemon=True,
+            target=self._execute, args=(run, args), daemon=True,
             name=f"alena-run:{key}",
         ).start()
         return run
 
-    def _execute(self, run: Run, command: Command) -> None:
+    def _execute(self, run: Run, args: List[str]) -> None:
         try:
             process = subprocess.Popen(
-                [str(self._wrapper), *command.args],
+                [str(self._wrapper), *args],
                 cwd=str(REPO_ROOT),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,

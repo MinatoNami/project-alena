@@ -52,10 +52,14 @@ def wait_for(run, runner, state="finished", timeout=10):
 # -- what may be started ---------------------------------------------------
 
 
-def test_implement_is_not_something_a_browser_can_start():
-    """It writes to a repository, and it is the thing most worth watching."""
-    assert "implement" not in COMMANDS
-    assert not any("implement" in c.args for c in COMMANDS.values())
+def test_implement_is_the_only_command_that_writes():
+    """Everything else reads, computes, or writes only to ALENA's own state.
+
+    It is available from the dashboard, and none of the gates in front of it
+    live in the dashboard: the registry capability, the accepted status and
+    the gateway grant all sit below, where a terminal run meets them too.
+    """
+    assert [k for k, c in COMMANDS.items() if c.writes] == ["implement"]
 
 
 def test_ingest_research_is_not_offered():
@@ -214,3 +218,194 @@ def test_a_second_run_is_a_409_not_a_500(client, slow_wrapper):
 
 def test_an_unknown_run_is_a_404(client):
     assert client.get("/api/runs/nope").status_code == 404
+
+
+# -- implement: the one that writes ----------------------------------------
+
+
+def test_implement_needs_a_repository_and_a_recommendation():
+    with pytest.raises(ValueError, match="recommendation_id"):
+        COMMANDS["implement"].build({"repository_id": "luma-index"})
+
+
+def test_implement_builds_the_cli_command():
+    assert COMMANDS["implement"].build(
+        {"repository_id": "luma-index", "recommendation_id": 3}
+    ) == ["implement", "luma-index", "3"]
+
+
+def test_implement_is_marked_as_writing():
+    """The UI puts writes behind a confirmation."""
+    assert COMMANDS["implement"].writes
+    assert not COMMANDS["scan"].writes
+
+
+def test_only_implement_takes_parameters():
+    """Everything else acts on the whole portfolio, so a stray click on one of
+    those cannot pick a repository."""
+    assert {k for k, c in COMMANDS.items() if c.parameters} == {"implement"}
+
+
+def test_implement_says_what_it_spends():
+    assert "branch" in COMMANDS["implement"].costs
+
+
+def test_a_parameterised_run_records_what_it_acted_on(fake_wrapper):
+    runner = Runner(fake_wrapper)
+    run = wait_for(
+        runner.start("implement", {"repository_id": "sample", "recommendation_id": 3}),
+        runner,
+    )
+
+    assert run.detail == "sample 3"
+    assert any("ran: implement sample 3" in line for line in run.output)
+
+
+# -- the API refuses early -------------------------------------------------
+
+
+@pytest.fixture
+def implementable(client, tmp_path, monkeypatch):
+    """A registry where the repository may be written to, and an accepted
+    recommendation to write for."""
+    import yaml
+
+    from modules.improve.decide import ACCEPTED, decide
+    from modules.improve.persistence import (
+        record_observation,
+        record_research,
+        upsert_recommendation,
+        upsert_repository,
+    )
+    from modules.improve.registry import load_registry
+
+    registry = tmp_path / "writable.yaml"
+    registry.write_text(
+        yaml.safe_dump(
+            {
+                "repositories": [
+                    {
+                        "id": "sample",
+                        "workspace": {"path": str(tmp_path)},
+                        "capabilities": {"modify": True, "create_branch": True},
+                    }
+                ]
+            }
+        )
+    )
+    monkeypatch.setenv("ALENA_REPOSITORIES", str(registry))
+
+    repository = load_registry(str(registry)).resolve("sample")
+    upsert_repository(repository)
+    research_id, _ = record_research(
+        repository_id="sample", source="test", content="# R", content_hash="h"
+    )
+    observation_id = record_observation(
+        research_id=research_id,
+        repository_id="sample",
+        title="A change",
+        normalized_title="a change",
+        body="...",
+        evidence=None,
+    )
+    recommendation_id = upsert_recommendation(
+        repository_id="sample",
+        observation_id=observation_id,
+        title="A change",
+        normalized_title="a change",
+        body="...",
+        score=0.8,
+    )
+    return recommendation_id, decide, ACCEPTED
+
+
+def test_implement_on_a_read_only_repository_is_refused(client, tmp_path, monkeypatch):
+    """All four registered repositories are read-only, and the dashboard
+    cannot change that."""
+    import yaml
+
+    registry = tmp_path / "readonly.yaml"
+    registry.write_text(
+        yaml.safe_dump(
+            {"repositories": [{"id": "sample", "workspace": {"path": str(tmp_path)}}]}
+        )
+    )
+    monkeypatch.setenv("ALENA_REPOSITORIES", str(registry))
+
+    response = client.post(
+        "/api/runs",
+        json={"command": "implement", "repository_id": "sample", "recommendation_id": 1},
+        headers=DASHBOARD,
+    )
+
+    assert response.status_code == 403
+    assert "read-only" in response.json()["detail"]
+
+
+def test_implement_on_an_undecided_recommendation_is_refused(client, implementable):
+    """A human decision is what authorises writing to a repository."""
+    recommendation_id, _, _ = implementable
+
+    response = client.post(
+        "/api/runs",
+        json={
+            "command": "implement",
+            "repository_id": "sample",
+            "recommendation_id": recommendation_id,
+        },
+        headers=DASHBOARD,
+    )
+
+    assert response.status_code == 422
+    assert "not accepted" in response.json()["detail"]
+
+
+def test_implement_on_an_accepted_recommendation_starts(client, implementable):
+    recommendation_id, decide, accepted = implementable
+    decide("sample", recommendation_id, accepted)
+
+    response = client.post(
+        "/api/runs",
+        json={
+            "command": "implement",
+            "repository_id": "sample",
+            "recommendation_id": recommendation_id,
+        },
+        headers=DASHBOARD,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["command"] == "implement"
+
+
+def test_implement_without_parameters_is_a_400(client):
+    response = client.post("/api/runs", json={"command": "implement"}, headers=DASHBOARD)
+
+    assert response.status_code == 400
+    assert "recommendation_id" in response.json()["detail"]
+
+
+def test_implement_on_an_unknown_repository_is_a_404(client):
+    response = client.post(
+        "/api/runs",
+        json={"command": "implement", "repository_id": "nope", "recommendation_id": 1},
+        headers=DASHBOARD,
+    )
+
+    assert response.status_code == 404
+
+
+def test_implement_still_needs_the_dashboard_header(client, implementable):
+    recommendation_id, decide, accepted = implementable
+    decide("sample", recommendation_id, accepted)
+
+    response = client.post(
+        "/api/runs",
+        json={
+            "command": "implement",
+            "repository_id": "sample",
+            "recommendation_id": recommendation_id,
+        },
+    )
+
+    assert response.status_code == 403

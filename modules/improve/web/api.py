@@ -121,6 +121,8 @@ async def guard(x_alena_dashboard: Optional[str] = Header(default=None)) -> None
 
 class RunRequest(BaseModel):
     command: str = Field(..., description="A key from /api/commands")
+    repository_id: Optional[str] = None
+    recommendation_id: Optional[int] = None
 
 
 class DecisionRequest(BaseModel):
@@ -325,6 +327,8 @@ def create_app() -> FastAPI:
                 "label": c.label,
                 "description": c.description,
                 "costs": c.costs,
+                "parameters": list(c.parameters),
+                "writes": c.writes,
             }
             for c in COMMANDS.values()
         ]
@@ -348,8 +352,17 @@ def create_app() -> FastAPI:
 
     @app.post("/api/runs", dependencies=[Depends(guard)])
     async def post_run(payload: RunRequest) -> Dict[str, Any]:
+        parameters = {
+            "repository_id": payload.repository_id,
+            "recommendation_id": payload.recommendation_id,
+        }
+        if payload.command == "implement":
+            _check_implementable(payload)
+
         try:
-            run = get_runner().start(payload.command)
+            run = get_runner().start(payload.command, parameters)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
         except KeyError:
             raise HTTPException(
                 status_code=400,
@@ -360,6 +373,59 @@ def create_app() -> FastAPI:
             # 409, not 500: nothing is broken, the caller just has to wait.
             raise HTTPException(status_code=409, detail=str(exc)) from None
         return run.to_dict()
+
+    def _check_implementable(payload: RunRequest) -> None:
+        """Refuse now rather than in log output forty seconds later.
+
+        The CLI enforces all of this again -- it has to, since a scheduled or
+        terminal run never comes through here. This exists so a mistake in the
+        browser is an immediate, readable refusal.
+        """
+        if not payload.repository_id or payload.recommendation_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail="implement needs a repository_id and a recommendation_id",
+            )
+
+        try:
+            repository = registry().resolve(payload.repository_id)
+        except RegistryError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from None
+
+        for capability in ("modify", "create_branch"):
+            if not repository.capabilities.allows(capability):
+                raise HTTPException(
+                    status_code=403,
+                    detail=(
+                        f"{repository.id} is read-only: {capability} is not "
+                        "enabled for it in config/repositories.yaml. Nothing in "
+                        "the dashboard can change that."
+                    ),
+                )
+
+        row = next(
+            (
+                r
+                for r in recommendations_for(payload.repository_id)
+                if r["id"] == payload.recommendation_id
+            ),
+            None,
+        )
+        if row is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No recommendation {payload.recommendation_id} for "
+                f"{payload.repository_id}",
+            )
+        if row["status"] != ACCEPTED:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Recommendation {payload.recommendation_id} is "
+                    f"{row['status']}, not accepted. A human decision is what "
+                    "authorises writing to a repository."
+                ),
+            )
 
     @app.get("/api/portfolio")
     async def get_portfolio() -> Dict[str, Any]:
