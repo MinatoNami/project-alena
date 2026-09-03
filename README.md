@@ -131,8 +131,9 @@ Notes:
 - ✅ Tool Gateway (policy, approval, audit log, pooled MCP sessions)
 - 🚧 MCP server expansion (more MCPs planned)
 - 🚧 Autonomous codebase improvement system — scanning, research ingest and
-  Codex engineering review work end to end; Claude review and the approval
-  gate are next. See [modules/improve](modules/improve/README.md),
+  two independent engineering reviewers work end to end; the human approval
+  gate and the action agent are next. See
+  [modules/improve](modules/improve/README.md),
   [the research contract](Documents/RESEARCH_DOCUMENT_CONTRACT.md) and
   [the implementation plan](Documents/ALENA_IMPROVE_IMPLEMENTATION_PLAN.md)
 - 🚧 Adaptive learning (currently stateless; KB + LLM-generated MCP servers coming next)

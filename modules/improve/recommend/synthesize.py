@@ -51,7 +51,8 @@ def reconcile(reviews: List[Dict[str, Any]]) -> tuple[Dict[str, Optional[float]]
     disagreement = len(verdicts) > 1
 
     combined: Dict[str, Optional[float]] = {
-        key: _mean([r.get(key) for r in usable]) for key in ("fit", "cost", "risk")
+        key: _mean([r.get(key) for r in usable])
+        for key in ("value", "fit", "cost", "risk")
     }
     confidence = _mean([r.get("confidence") for r in usable])
     if disagreement and confidence is not None:
@@ -143,7 +144,10 @@ def synthesize_observation(
 
     dimensions = Dimensions.from_mapping(
         {
-            "value": _mean([r.get("fit") for r in reviews]),
+            # The reviewer's own value judgement. Substituting `fit` here --
+            # as this did until schema 005 -- scores a trivial convenience
+            # that slots in neatly as highly as a capability the product needs.
+            "value": combined["value"],
             "fit": combined["fit"],
             "cost": combined["cost"],
             "risk": combined["risk"],

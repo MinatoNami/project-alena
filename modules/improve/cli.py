@@ -18,7 +18,7 @@ from .context_package import build_context_package
 from .persistence import latest_scan
 from .registry import RegistryError, Repository, load_registry
 from .research import ingest_file, research_files
-from .review_run import recommend_repository, review_repository
+from .review_run import escalate_repository, recommend_repository, review_repository
 from .scan_run import ScanOutcome, scan_repository
 from .wiring import install_gateway
 
@@ -182,8 +182,20 @@ def cmd_review(args: argparse.Namespace) -> int:
 
     failed = 0
     for repository in _targets(registry, args.repository, args.all):
-        run = review_repository(repository, limit=args.limit)
-        print(run.describe())
+        if args.agent == "claude":
+            run = escalate_repository(
+                repository,
+                limit=args.limit,
+                dry_run=args.dry_run,
+                retry_failed=args.retry_failed,
+            )
+            print(run.describe())
+            if args.dry_run:
+                for line in run.reviewed:
+                    print(f"  would escalate: {line}")
+        else:
+            run = review_repository(repository, limit=args.limit)
+            print(run.describe())
         failed += len(run.failed)
     return 1 if failed else 0
 
@@ -273,6 +285,24 @@ def build_parser() -> argparse.ArgumentParser:
     review.add_argument("repository", nargs="?")
     review.add_argument("--all", action="store_true")
     review.add_argument("--limit", type=int, help="Review at most this many")
+    review.add_argument(
+        "--agent",
+        choices=("codex", "claude"),
+        default="codex",
+        help="codex reviews everything new; claude only what clears the "
+        "escalation thresholds",
+    )
+    review.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="With --agent claude: show what would escalate, and why, "
+        "without calling the routine",
+    )
+    review.add_argument(
+        "--retry-failed",
+        action="store_true",
+        help="Re-attempt escalations whose previous review errored",
+    )
     review.set_defaults(func=cmd_review)
 
     recommend = sub.add_parser(

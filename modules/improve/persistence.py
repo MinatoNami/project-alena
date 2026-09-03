@@ -369,8 +369,11 @@ def record_review(
     fit: Optional[float] = None,
     cost: Optional[float] = None,
     risk: Optional[float] = None,
+    value: Optional[float] = None,
     body: Optional[str] = None,
     path: Optional[str] = None,
+    requires_architecture_review: Optional[bool] = None,
+    security_sensitive: Optional[bool] = None,
     conn: Optional[sqlite3.Connection] = None,
 ) -> int:
     conn = conn or get_connection()
@@ -378,8 +381,9 @@ def record_review(
         """
         INSERT INTO engineering_reviews
             (observation_id, repository_id, created_at, agent, verdict,
-             confidence, fit, cost, risk, body, path)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             confidence, fit, cost, risk, value, body, path,
+             requires_architecture_review, security_sensitive)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             observation_id,
@@ -391,12 +395,41 @@ def record_review(
             fit,
             cost,
             risk,
+            value,
             body,
             path,
+            # Stored as tri-state: NULL means the reviewer did not say.
+            None if requires_architecture_review is None else int(bool(requires_architecture_review)),
+            None if security_sensitive is None else int(bool(security_sensitive)),
         ),
     )
     conn.commit()
     return int(cursor.lastrowid)
+
+
+def set_escalation_reason(
+    observation_id: int, reason: Optional[str], conn: Optional[sqlite3.Connection] = None
+) -> None:
+    """Record why a candidate was sent for a second opinion.
+
+    Kept so the thresholds can be tuned later against which escalations turned
+    out to be worth their cost.
+    """
+    conn = conn or get_connection()
+    conn.execute(
+        "UPDATE observations SET escalation_reason = ? WHERE id = ?",
+        (reason, observation_id),
+    )
+    conn.commit()
+
+
+def observations_with_reviews(
+    repository_id: str, conn: Optional[sqlite3.Connection] = None
+) -> List[tuple]:
+    """Every observation that has been reviewed, with its reviews."""
+    conn = conn or get_connection()
+    observations = observations_for(repository_id, conn=conn)
+    return [(o, reviews_for(o["id"], conn)) for o in observations]
 
 
 def reviews_for(

@@ -15,7 +15,9 @@ from typing import Any, Dict, List, Optional
 
 from modules.core.controller.logger import logger
 
+from .agents import claude_review
 from .agents.codex_review import review_observation
+from .agents.triggers import candidate_from_rows, should_escalate
 from .context_package import build_context_package
 from .persistence import (
     latest_scan,
@@ -23,6 +25,8 @@ from .persistence import (
     recommendations_by_status,
     recommendations_for,
     record_review,
+    reviews_for,
+    set_escalation_reason,
     upsert_repository,
 )
 from .recommend.render import render_report, write_report
@@ -35,16 +39,21 @@ MAX_CONTEXT_CHARS = 6000
 @dataclass
 class ReviewRun:
     repository_id: str
+    agent: str = "codex"
     reviewed: List[str] = field(default_factory=list)
     failed: List[str] = field(default_factory=list)
     skipped: int = 0
+    considered: int = 0
 
     def describe(self) -> str:
-        parts = [f"{len(self.reviewed)} reviewed"]
+        parts = [f"{self.agent}: {len(self.reviewed)} reviewed"]
         if self.failed:
             parts.append(f"{len(self.failed)} failed")
         if self.skipped:
-            parts.append(f"{self.skipped} already reviewed")
+            parts.append(f"{self.skipped} below the escalation threshold")
+        if self.considered and self.agent != "codex":
+            rate = len(self.reviewed) / self.considered
+            parts.append(f"{rate:.0%} of {self.considered} escalated")
         return f"{self.repository_id}: {', '.join(parts)}"
 
 
@@ -77,7 +86,7 @@ async def review_repository_async(
 ) -> ReviewRun:
     repository.require("analyze")
     upsert_repository(repository, conn)
-    run = ReviewRun(repository.id)
+    run = ReviewRun(repository.id, agent="codex")
 
     observations = observations_for(
         repository.id, unreviewed_only=True, conn=conn
@@ -109,7 +118,10 @@ async def review_repository_async(
             fit=result.fit,
             cost=result.cost,
             risk=result.risk,
+            value=result.value,
             body=result.body or (result.error or ""),
+            requires_architecture_review=result.requires_architecture_review,
+            security_sensitive=result.security_sensitive,
             conn=conn,
         )
         if result.ok:
@@ -123,6 +135,93 @@ async def review_repository_async(
 
 def review_repository(repository: Repository, **kwargs) -> ReviewRun:
     return asyncio.run(review_repository_async(repository, **kwargs))
+
+
+def escalate_repository(
+    repository: Repository,
+    *,
+    limit: Optional[int] = None,
+    dry_run: bool = False,
+    retry_failed: bool = False,
+    caller=None,
+    conn=None,
+) -> ReviewRun:
+    """Send the candidates that justify it to Claude for a second opinion.
+
+    Everything expensive is behind the predicate in agents/triggers.py. A
+    candidate that clears no threshold is skipped and the reason recorded, so
+    the escalation rate is visible rather than something to find out from a
+    bill.
+    """
+    repository.require("analyze")
+    upsert_repository(repository, conn)
+    run = ReviewRun(repository.id, agent="claude")
+
+    scan = latest_scan(repository.id, conn)
+    context = _context_text(repository, scan)
+    rejected = recommendations_by_status(repository.id, conn)["rejected"]
+    scored = {
+        row["observation_id"]: row
+        for row in recommendations_for(repository.id, conn=conn)
+        if row.get("observation_id")
+    }
+
+    for observation in observations_for(repository.id, conn=conn):
+        reviews = reviews_for(observation["id"], conn)
+        if not reviews:
+            continue
+
+        run.considered += 1
+        recommendation = scored.get(observation["id"], {})
+        candidate = candidate_from_rows(
+            observation,
+            reviews,
+            repository_tags=repository.tags,
+            score=recommendation.get("score"),
+            effort=recommendation.get("estimated_effort"),
+            retry_failed=retry_failed,
+        )
+        decision = should_escalate(candidate)
+        set_escalation_reason(observation["id"], decision.reason, conn)
+
+        if not decision.escalate:
+            run.skipped += 1
+            continue
+        if dry_run:
+            run.reviewed.append(f"{observation['title']} — {decision.reason}")
+            continue
+
+        codex = next((r for r in reviews if r["agent"] == "codex"), None)
+        result = claude_review.review_observation(
+            repository,
+            observation,
+            codex_review=codex,
+            context=context,
+            rejected=rejected,
+            caller=caller,
+        )
+        record_review(
+            observation_id=observation["id"],
+            repository_id=repository.id,
+            agent="claude",
+            verdict=result.verdict,
+            confidence=result.confidence,
+            fit=result.fit,
+            cost=result.cost,
+            risk=result.risk,
+            value=result.value,
+            body=result.body or (result.error or ""),
+            requires_architecture_review=result.requires_architecture_review,
+            security_sensitive=result.security_sensitive,
+            conn=conn,
+        )
+        if result.ok:
+            run.reviewed.append(observation["title"])
+        else:
+            run.failed.append(observation["title"])
+            logger.warning(f"{repository.id}: Claude review failed — {result.error}")
+
+    return run
 
 
 @dataclass

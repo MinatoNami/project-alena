@@ -183,3 +183,25 @@ def test_recommend_with_nothing_reviewed_writes_an_empty_report(registry_file, c
     out = capsys.readouterr().out
     assert "0 recommendation(s)" in out
     assert "latest.md" in out
+
+
+def test_review_with_claude_and_no_routine_configured(registry_file, capsys, monkeypatch):
+    """It should say what to set, not fail obscurely."""
+    monkeypatch.delenv("CLAUDE_ROUTINE_URL", raising=False)
+    run("ingest-research", "sample", "--registry", registry_file, "--from-dir", ".")
+    capsys.readouterr()
+
+    assert run("review", "sample", "--agent", "claude", "--registry", registry_file) == 0
+    assert "claude:" in capsys.readouterr().out
+
+
+def test_review_dry_run_reports_what_would_escalate(registry_file, capsys):
+    assert run(
+        "review", "sample", "--agent", "claude", "--dry-run", "--registry", registry_file
+    ) == 0
+    assert "claude:" in capsys.readouterr().out
+
+
+def test_review_defaults_to_codex(registry_file, capsys):
+    assert run("review", "sample", "--registry", registry_file) == 0
+    assert "codex:" in capsys.readouterr().out
