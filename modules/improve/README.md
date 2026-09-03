@@ -224,6 +224,44 @@ the base branch and deletes its own branch. Removing untracked files is safe
 so anything untracked afterwards is the agent's own output. The implementation
 row is written before any of this, so a half-finished branch can still be found.
 
+## Portfolio intelligence
+
+The spec's ambition here is a system that notices Text Whisperer already has
+transcription before the health app grows its own. That needs semantic
+understanding of what each repository *does*, which is a later problem.
+
+What is available now is deterministic and still useful. Every repository has
+been scanned, so their languages, dependencies and tags are known facts, and
+three things fall out of comparing them:
+
+**Shared technology** — who would be affected by the same framework release.
+
+**Divergent pins** — the same dependency specified differently in two places.
+Nobody decided that; it accumulated. Cosmetic differences are normalised away
+(`>=23.0,<24.0` and `>=23,<24` are one pin written twice), so what remains is
+real: across the four registered repositories, `nuxt` is a major version behind
+in one of them and `cryptography` differs by two.
+
+**Work that travels** — a recommendation accepted for one repository, in a
+technology another one also uses. Rejections deliberately do not travel: a
+rejection is a judgement about one repository's circumstances, and suggesting a
+neighbour adopt something you turned down is worse than saying nothing.
+
+Nothing here is written into the recommendations table. A cross-repository
+finding is an observation for a human; turning one into a recommendation
+automatically would let it skip the review every other recommendation goes
+through.
+
+## Exposed over MCP
+
+[`modules/mcp/alena-core`](../mcp/alena-core/README.md) puts all of this behind
+one MCP server, so Claude, ChatGPT, a local model and this CLI reach one
+implementation rather than three provider-specific integrations. Every tool
+there is read-only, and a test asserts it — a client reaching that server talks
+to it directly, with the gateway nowhere in the path.
+
+`modules/improve/query.py` holds the functions; the server only adapts them.
+
 ## Commands
 
 ```bash
@@ -249,6 +287,9 @@ scripts/alena_improve.sh implement luma-index 3                # writes a branch
 scripts/alena_improve.sh trail luma-index 3                    # what happened
 scripts/alena_improve.sh decide luma-index 3 --successful \
     --actual-effort LARGE --observed-value 0.8
+
+scripts/alena_improve.sh portfolio                             # the whole picture
+scripts/alena_improve.sh portfolio --capability whisper        # who already has it
 ```
 
 The last one closes the loop the spec asks for: estimated against actual
@@ -296,6 +337,8 @@ modules/improve/
 ├── recommend/         dedup, scoring, synthesis, markdown
 ├── action/            the action agent, cross-review routing, test running
 ├── decide.py          the approval gate and its state machine
+├── portfolio.py       the capability graph and what repositories share
+├── query.py           read-only queries, the MCP server's whole substance
 ├── text.py            shared normalisation (owned by neither, to avoid a cycle)
 ├── context_package.py the .context/ bundle every agent reads
 ├── persistence.py     SQLite reads and writes

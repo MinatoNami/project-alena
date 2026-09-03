@@ -135,3 +135,47 @@ class ToolCatalog:
                 continue
             tools.append(self._contracts[name].to_openai_tool())
         return tools
+
+
+# The MCP servers ALENA can discover tools from, as (key, folder) pairs. The
+# legacy servers are still described by tool_definitions.py; alena-core is
+# discovered, which is the direction everything moves in.
+DISCOVERABLE_SERVERS = (("alena-core", "alena-core"),)
+
+
+def server_parameters(folder: str):
+    """Stdio parameters for one of ALENA's own MCP servers."""
+    import os
+    import sys
+
+    from mcp import StdioServerParameters
+
+    root = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "mcp", folder)
+    )
+    return StdioServerParameters(
+        command=sys.executable, args=["-m", "app.main"], cwd=root, env={**os.environ}
+    )
+
+
+async def discover_into(catalog: "ToolCatalog", pool=None) -> List[str]:
+    """Register every discoverable server's tools, MCP-first.
+
+    Discovery is the canonical source for these; the static provider covers
+    only the legacy servers. A server that fails to start is logged and
+    skipped, because one broken server should not take the catalog with it.
+    """
+    from modules.core.controller.logger import logger
+
+    from .discovery import discover
+
+    found: List[str] = []
+    for key, folder in DISCOVERABLE_SERVERS:
+        try:
+            contracts = await discover(server_parameters(folder), key, pool)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"Could not discover tools from {key}: {exc!r}")
+            continue
+        catalog.register(contracts)
+        found.extend(c.name for c in contracts)
+    return found

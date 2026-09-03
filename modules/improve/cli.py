@@ -28,6 +28,8 @@ from .decide import (
     history,
 )
 from .persistence import implementations_for, latest_scan, recommendations_for
+from .query import portfolio_snapshot, search_capability
+from .recommend.render import render_portfolio, write_portfolio
 from .registry import RegistryError, Repository, load_registry
 from .research import ingest_file, research_files
 from .review_run import escalate_repository, recommend_repository, review_repository
@@ -341,6 +343,34 @@ def cmd_show_decision(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_portfolio(args: argparse.Namespace) -> int:
+    registry = load_registry(args.registry)
+    ensure_layout()
+
+    if args.capability:
+        matches = search_capability(args.capability, registry)
+        if not matches:
+            print(f"Nothing in the portfolio matches {args.capability!r}.")
+            return 0
+        for key, users in matches.items():
+            kind, _, name = key.partition(":")
+            print(f"  {name:28} ({kind:10}) {', '.join(users)}")
+        return 0
+
+    snapshot = portfolio_snapshot(registry)
+    text = render_portfolio(snapshot)
+    written = write_portfolio(text)
+
+    print(
+        f"{len(snapshot['repositories'])} repositories, "
+        f"{len(snapshot['shared'])} shared technologies, "
+        f"{len(snapshot['divergence'])} divergent pins"
+    )
+    for path in written:
+        print(f"  {path}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     # Config paths are accepted both before and after the subcommand: the
     # natural thing to type is `scan --all --registry x`, but the global form
@@ -483,6 +513,14 @@ def build_parser() -> argparse.ArgumentParser:
     trail.add_argument("repository")
     trail.add_argument("id", type=int)
     trail.set_defaults(func=cmd_show_decision)
+
+    portfolio = sub.add_parser(
+        "portfolio", parents=[common], help="What the repositories have in common"
+    )
+    portfolio.add_argument(
+        "--capability", help="Which repositories already use this technology"
+    )
+    portfolio.set_defaults(func=cmd_portfolio)
 
     return parser
 

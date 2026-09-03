@@ -88,6 +88,47 @@ tools:
     side_effect: destructive
     allowed_agents: ["assistant"]
 
+  # --- alena-core MCP ------------------------------------------------------
+  # ALENA's own capabilities, exposed so Claude, ChatGPT and local models reach
+  # one implementation instead of three.
+  #
+  # Every one of these is read_only, and that is a property of the server
+  # rather than a coincidence: a client configured to reach alena-core talks to
+  # it directly, without ALENA's gateway in between. Read-only by construction
+  # is what makes that safe to expose. A test asserts it, so adding a tool here
+  # that writes fails the build rather than quietly widening the surface.
+  repo.search:
+    side_effect: read_only
+    allowed_agents: ["*"]
+
+  repo.find_todos:
+    side_effect: read_only
+    allowed_agents: ["*"]
+
+  repo.get_dependencies:
+    side_effect: read_only
+    allowed_agents: ["*"]
+
+  repo.get_history:
+    side_effect: read_only
+    allowed_agents: ["*"]
+
+  memory.search:
+    side_effect: read_only
+    allowed_agents: ["*"]
+
+  recommendation.search:
+    side_effect: read_only
+    allowed_agents: ["*"]
+
+  portfolio.search_capability:
+    side_effect: read_only
+    allowed_agents: ["*"]
+
+  portfolio.dependency_divergence:
+    side_effect: read_only
+    allowed_agents: ["*"]
+
 # Per-repository overrides. Deny always beats allow. A repository with no entry
 # here inherits whatever the tool policy above permits.
 #

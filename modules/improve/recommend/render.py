@@ -124,3 +124,80 @@ def write_report(
     dated.write_text(text)
     latest.write_text(text)
     return [dated, latest]
+
+
+def render_portfolio(snapshot: Dict[str, Any]) -> str:
+    """The portfolio view, as a human reads it."""
+    repositories = snapshot.get("repositories") or {}
+    shared = snapshot.get("shared") or {}
+    divergence = snapshot.get("divergence") or []
+    findings = snapshot.get("findings") or []
+
+    lines = [
+        "# Portfolio",
+        "",
+        f"_Generated {utcnow()} across {len(repositories)} repositories._",
+        "",
+        "| Repository | Technologies |",
+        "|---|---|",
+    ]
+    for repository_id, info in repositories.items():
+        lines.append(f"| {info.get('name', repository_id)} | {len(info.get('technologies') or [])} |")
+    lines.append("")
+
+    if divergence:
+        lines += [
+            "## Dependencies pinned differently",
+            "",
+            "Nobody decided these; they accumulated. The repositories that drift",
+            "furthest apart are where a shared fix stops applying cleanly.",
+            "",
+            "| Dependency | Pins |",
+            "|---|---|",
+        ]
+        for item in divergence:
+            pins = "; ".join(
+                f"{repo} `{spec or 'unpinned'}`"
+                for repo, spec in (item.get("specifiers") or {}).items()
+            )
+            lines.append(f"| {item['name']} ({item['ecosystem']}) | {pins} |")
+        lines.append("")
+
+    dependencies = {
+        key.split(":", 1)[1]: users
+        for key, users in shared.items()
+        if key.startswith("dependency:")
+    }
+    if dependencies:
+        lines += ["## Shared dependencies", "", "| Dependency | Used by |", "|---|---|"]
+        for name, users in sorted(dependencies.items()):
+            lines.append(f"| {name} | {', '.join(users)} |")
+        lines.append("")
+
+    travelling = [f for f in findings if f["kind"] == "travelling-recommendation"]
+    if travelling:
+        lines += [
+            "## Work that might travel",
+            "",
+            "Accepted for one repository, in a technology another one also uses.",
+            "Nothing is proposed automatically -- a cross-repository finding is an",
+            "observation, and turning one into a recommendation would let it skip",
+            "the review every other recommendation goes through.",
+            "",
+        ]
+        for finding in travelling:
+            lines.append(f"- **{finding['title']}** — {finding['detail']}")
+            lines.append(f"  - relevant to: {', '.join(finding['repositories'])}")
+        lines.append("")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def write_portfolio(text: str, root: Optional[Path] = None) -> List[Path]:
+    base = (root or intelligence_dir()) / "portfolio"
+    base.mkdir(parents=True, exist_ok=True)
+    dated = base / f"{date.today().isoformat()}.md"
+    latest = base / "latest.md"
+    dated.write_text(text)
+    latest.write_text(text)
+    return [dated, latest]

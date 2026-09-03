@@ -1,3 +1,5 @@
+import pytest
+
 from modules.gateway.catalog import ToolCatalog, static_contracts
 from modules.gateway.contracts import ToolContract
 from modules.gateway.policy import parse_policy
@@ -68,15 +70,20 @@ def test_missing_tool_returns_none():
     assert catalog().get("nope") is None
 
 
-def test_the_shipped_policy_matches_the_shipped_tools():
-    """The legacy definitions and config/tool_policy.yaml must not drift."""
+def test_every_legacy_tool_is_declared_in_the_shipped_policy():
+    """The legacy definitions and config/tool_policy.yaml must not drift.
+
+    Only one direction is checkable here: the policy also declares the
+    alena-core tools, which arrive by discovery rather than from the static
+    provider. Both directions are checked once both providers have run --
+    see test_alena_core_tools_are_discovered_and_all_declared.
+    """
     from modules.gateway.policy import load_policy
 
     c = ToolCatalog(load_policy())
     c.register(static_contracts())
 
     assert c.undeclared() == [], "tools exist that the policy does not declare"
-    assert c.unimplemented() == [], "policy declares tools that do not exist"
 
 
 def test_a_server_claiming_worse_than_policy_is_flagged():
@@ -105,3 +112,52 @@ def test_a_server_claiming_safer_than_policy_is_not_flagged():
     )
 
     assert c.disagreements() == []
+
+
+# --- discovery of ALENA's own servers --------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_alena_core_tools_are_discovered_and_all_declared(tmp_path, monkeypatch):
+    """MCP-first: the contract comes from the server, the policy from the file.
+
+    Fails if a tool ships without a policy entry, or a policy entry outlives
+    its tool.
+    """
+    monkeypatch.setenv("ALENA_DB_PATH", str(tmp_path / "state.db"))
+    from modules.gateway.catalog import discover_into
+    from modules.gateway.policy import load_policy
+    from modules.gateway.pool import MCPSessionPool
+
+    catalog = ToolCatalog(load_policy())
+    catalog.register(static_contracts())
+
+    pool = MCPSessionPool()
+    try:
+        discovered = await discover_into(catalog, pool)
+    finally:
+        await pool.aclose()
+
+    assert discovered, "alena-core advertised no tools"
+    assert catalog.undeclared() == []
+    assert catalog.unimplemented() == []
+    assert all(catalog.get(name).contract.source == "mcp" for name in discovered)
+
+
+@pytest.mark.asyncio
+async def test_a_server_that_will_not_start_does_not_take_the_catalog_with_it(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("ALENA_DB_PATH", str(tmp_path / "state.db"))
+    from modules.gateway import catalog as catalog_module
+    from modules.gateway.policy import load_policy
+
+    monkeypatch.setattr(
+        catalog_module, "DISCOVERABLE_SERVERS", (("broken", "does-not-exist"),)
+    )
+
+    catalog = ToolCatalog(load_policy())
+    catalog.register(static_contracts())
+
+    assert await catalog_module.discover_into(catalog) == []
+    assert catalog.names()  # the static tools are still there
