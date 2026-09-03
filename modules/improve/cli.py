@@ -208,7 +208,9 @@ def cmd_review(args: argparse.Namespace) -> int:
                 for line in run.reviewed:
                     print(f"  would escalate: {line}")
         else:
-            run = review_repository(repository, limit=args.limit)
+            run = review_repository(
+                repository, limit=args.limit, retry_failed=args.retry_failed
+            )
             print(run.describe())
         failed += len(run.failed)
     return 1 if failed else 0
@@ -455,6 +457,171 @@ def cmd_check_routine(args: argparse.Namespace) -> int:
     return 0 if result.ok else 1
 
 
+def cmd_status(args: argparse.Namespace) -> int:
+    """Where everything is, and what is waiting on you."""
+    from .status import summary
+
+    registry = load_registry(args.registry)
+    state = summary(registry)
+    coverage = state["coverage"]
+
+    scanned = (
+        f"last scan {coverage.last_scan_days}d ago"
+        if coverage.last_scan_days is not None
+        else "never scanned"
+    )
+    print(
+        f"Repositories   {coverage.scanned}/{coverage.repositories} scanned, {scanned}"
+    )
+    print(
+        f"Research       {coverage.research_documents} document(s) ingested"
+        + ("" if coverage.research_documents else "  (nothing to review yet)")
+    )
+    print()
+
+    for stage in state["stages"]:
+        marker = "  !" if stage.stale else "   "
+        print(f"{marker} {stage.describe()}")
+
+    if state["jobs"]:
+        print()
+        print("Scheduled")
+        for job in state["jobs"]:
+            marker = "  !" if job.failing else "   "
+            print(f"{marker} {job.describe()}")
+
+    print()
+    if state["stalled"]:
+        print("Stalled:")
+        for stage in state["stalled"]:
+            print(f"  {stage.label.lower()} — oldest is {stage.oldest_days} days old")
+            for example in stage.examples:
+                print(f"    {example}")
+        print()
+
+    if state["stranded"]:
+        print(
+            f"{len(state['stranded'])} observation(s) have a failed review and "
+            "will not be retried on their own:"
+        )
+        for row in state["stranded"][:5]:
+            print(f"  {row['repository_id']} — {row['title']}")
+        print("  retry them:  alena-improve review --all --retry-failed")
+        print()
+
+    failing = [j for j in state["jobs"] if j.failing]
+    for job in failing:
+        print(f"{job.label} is failing. Look at {job.log}")
+    if failing:
+        print()
+
+    waiting = state["waiting_on_you"]
+    if waiting:
+        print(f"{waiting} recommendation(s) need a decision:  alena-improve queue")
+    elif coverage.research_documents == 0:
+        print(
+            "Nothing needs you. The loop produces recommendations once research "
+            "is ingested:\n"
+            "  alena-improve ingest-research <repository> <file.md>"
+        )
+    else:
+        print("Nothing needs you.")
+    return 0
+
+
+def cmd_queue(args: argparse.Namespace) -> int:
+    """The approval queue: what is proposed, why, and how to answer."""
+    registry = load_registry(args.registry)
+    targets = _targets(registry, args.repository, args.all or not args.repository)
+
+    shown = 0
+    for repository in targets:
+        rows = recommendations_for(repository.id, RECOMMENDED)
+        if not rows:
+            continue
+
+        for row in rows:
+            shown += 1
+            breakdown = {}
+            if row.get("score_breakdown"):
+                try:
+                    breakdown = json.loads(row["score_breakdown"])
+                except json.JSONDecodeError:
+                    pass
+
+            score = f"{row['score']:.2f}" if row["score"] is not None else "?"
+            confidence = (
+                f"{row['confidence'] * 100:.0f}%"
+                if row["confidence"] is not None
+                else "unknown"
+            )
+            print("=" * 72)
+            print(f"#{row['id']}  {row['title']}")
+            print(
+                f"  {repository.name} · {breakdown.get('priority', '?')} · "
+                f"score {score} · effort {row['estimated_effort'] or '?'} · "
+                f"confidence {confidence}"
+            )
+            print()
+
+            body = (row["body"] or "").strip()
+            if args.full:
+                print(body)
+            else:
+                print(_condense(body))
+            print()
+            print(f"  accept   alena-improve decide {repository.id} {row['id']} --accept")
+            print(
+                f"  reject   alena-improve decide {repository.id} {row['id']} "
+                f'--reject --reason "..."'
+            )
+            print()
+
+    if not shown:
+        print("Nothing is awaiting a decision.")
+        return 0
+
+    print("=" * 72)
+    print(f"{shown} awaiting a decision. Use --full to read them in full.")
+    return 0
+
+
+# Sections of a rendered recommendation, in the order a reader wants them.
+_QUEUE_SECTIONS = ("Research Evidence", "Codex Assessment", "Claude Assessment",
+                   "Disagreement")
+_CONDENSED_LINES = 6
+
+
+def _condense(body: str) -> str:
+    """The first few lines of each section that carries a judgement.
+
+    A rendered recommendation runs to a page or more, mostly repository
+    summary the reader already knows. The queue is for deciding, so it shows
+    the evidence and the verdicts and leaves the rest behind --full.
+    """
+    sections: Dict[str, List[str]] = {}
+    current = None
+    for line in body.splitlines():
+        if line.startswith("### "):
+            current = line[4:].strip()
+            sections[current] = []
+        elif current:
+            sections[current].append(line)
+
+    out: List[str] = []
+    for name in _QUEUE_SECTIONS:
+        lines = [line for line in sections.get(name, []) if line.strip()]
+        if not lines:
+            continue
+        out.append(f"  {name}")
+        for line in lines[:_CONDENSED_LINES]:
+            out.append(f"    {line.strip()[:100]}")
+        if len(lines) > _CONDENSED_LINES:
+            out.append("    ...")
+        out.append("")
+    return "\n".join(out).rstrip() or "  (no detail recorded)"
+
+
 def build_parser() -> argparse.ArgumentParser:
     # Config paths are accepted both before and after the subcommand: the
     # natural thing to type is `scan --all --registry x`, but the global form
@@ -627,6 +794,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     check.add_argument("--verbose", action="store_true", help="Print the reply")
     check.set_defaults(func=cmd_check_routine)
+
+    status = sub.add_parser(
+        "status", parents=[common], help="Where everything is, and what needs you"
+    )
+    status.set_defaults(func=cmd_status)
+
+    queue = sub.add_parser(
+        "queue",
+        parents=[common],
+        help="Recommendations awaiting a decision, with the reasoning",
+    )
+    queue.add_argument("repository", nargs="?")
+    queue.add_argument("--all", action="store_true")
+    queue.add_argument("--full", action="store_true", help="Print the whole body")
+    queue.set_defaults(func=cmd_queue)
 
     return parser
 

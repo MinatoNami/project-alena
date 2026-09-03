@@ -355,6 +355,47 @@ to it directly, with the gateway nowhere in the path.
 
 `modules/improve/query.py` holds the functions; the server only adapts them.
 
+## Using it day to day
+
+Two commands cover it.
+
+```bash
+scripts/alena_improve.sh status     # where is everything, what needs me
+scripts/alena_improve.sh queue      # what is proposed, why, and how to answer
+```
+
+`status` counts what is sitting at each hand-off and how long it has been
+sitting. The ages are the useful part: "3 awaiting decision" is a working
+system, "3 awaiting decision, oldest 24 days" is a queue nobody is reading.
+
+```
+Repositories   4/4 scanned, last scan 0d ago
+Research       1 document(s) ingested
+
+    Observations awaiting review: none
+    Reviewed, awaiting scoring: none
+    Recommendations awaiting your decision: 1
+    Accepted, awaiting implementation: none
+    Implemented, awaiting an outcome: none
+
+Scheduled
+    local.alena.scan: last run ok
+    ...
+
+1 recommendation(s) need a decision:  alena-improve queue
+```
+
+Every hand-off in the pipeline is somewhere work can quietly stop, and a
+stalled stage looks exactly like a quiet week. Three things get called out
+rather than left to be noticed: a stage whose oldest item has passed its
+staleness threshold, a scheduled job whose last run failed, and observations
+whose only review errored — those will not be retried on their own, so
+`status` names them and prints the flag that picks them back up.
+
+`queue` is the approval view. Each recommendation with its score, its
+evidence, the reviewers' verdicts, and the exact commands to accept or
+reject it. `--full` prints the whole body rather than the condensed sections.
+
 ## Commands
 
 ```bash
@@ -376,7 +417,9 @@ scripts/alena_improve.sh review luma-index --agent claude --dry-run
 scripts/alena_improve.sh review luma-index --agent claude      # second opinion
 scripts/alena_improve.sh recommend luma-index                  # score and report
 
-scripts/alena_improve.sh pending                               # awaiting a decision
+scripts/alena_improve.sh status                                # the whole picture
+scripts/alena_improve.sh queue                                 # decide on things
+scripts/alena_improve.sh pending                               # just the titles
 scripts/alena_improve.sh decide luma-index 3 --accept
 scripts/alena_improve.sh decide luma-index 4 --reject --reason "too early"
 scripts/alena_improve.sh implement luma-index 3                # writes a branch
@@ -483,6 +526,7 @@ modules/improve/
 ├── action/            the action agent, cross-review routing, test running
 ├── decide.py          the approval gate and its state machine
 ├── portfolio.py       the capability graph and what repositories share
+├── status.py          where work is sitting, and what is stuck
 ├── query.py           read-only queries, the MCP server's whole substance
 ├── text.py            shared normalisation (owned by neither, to avoid a cycle)
 ├── context_package.py the .context/ bundle every agent reads

@@ -289,3 +289,67 @@ def test_trail_shows_the_decision_history(registry_file, accepted_recommendation
 
     assert run("trail", "sample", str(accepted_recommendation), "--registry", registry_file) == 0
     assert "recommended -> accepted" in capsys.readouterr().out
+
+
+# --- monitoring and the approval queue -------------------------------------
+
+
+def test_status_on_a_fresh_system_says_nothing_needs_you(registry_file, capsys):
+    assert run("status", "--registry", registry_file) == 0
+    out = capsys.readouterr().out
+    assert "Nothing needs you" in out
+    assert "ingest-research" in out
+
+
+def test_status_counts_work_waiting_at_each_stage(registry_file, repository, capsys):
+    from modules.improve.research import ingest_text
+
+    ingest_text(repository, RESEARCH_DOC, use_embeddings=False)
+
+    assert run("status", "--registry", registry_file) == 0
+    assert "Observations awaiting review: 1" in capsys.readouterr().out
+
+
+def test_status_reports_a_stranded_observation(registry_file, repository, capsys):
+    from modules.improve.persistence import observations_for, record_review
+    from modules.improve.research import ingest_text
+
+    ingest_text(repository, RESEARCH_DOC, use_embeddings=False)
+    record_review(
+        observation_id=observations_for("sample")[0]["id"],
+        repository_id="sample",
+        agent="codex",
+        verdict="error",
+        body="codex CLI not found",
+    )
+
+    run("status", "--registry", registry_file)
+    out = capsys.readouterr().out
+    assert "failed review" in out
+    assert "--retry-failed" in out
+
+
+def test_the_queue_is_empty_on_a_fresh_system(registry_file, capsys):
+    assert run("queue", "--registry", registry_file) == 0
+    assert "Nothing is awaiting a decision" in capsys.readouterr().out
+
+
+def test_the_queue_shows_a_recommendation_and_how_to_answer(
+    registry_file, accepted_recommendation, capsys
+):
+    assert run("queue", "sample", "--registry", registry_file) == 0
+
+    out = capsys.readouterr().out
+    assert "A change" in out
+    assert f"decide sample {accepted_recommendation} --accept" in out
+    assert "--reject --reason" in out
+
+
+def test_the_queue_drops_a_recommendation_once_it_is_decided(
+    registry_file, accepted_recommendation, capsys
+):
+    run("decide", "sample", str(accepted_recommendation), "--accept", "--registry", registry_file)
+    capsys.readouterr()
+
+    run("queue", "sample", "--registry", registry_file)
+    assert "Nothing is awaiting a decision" in capsys.readouterr().out

@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 
 from typing import Callable, Optional, Set
 from types import SimpleNamespace
@@ -25,7 +26,12 @@ def _build_server_config(mcp_server_key: str) -> SimpleNamespace:
         folder = mcp_server_key
 
     return SimpleNamespace(
-        command="python",
+        # sys.executable, not "python": an MCP server needs the same
+        # interpreter as its caller, because that is the one with `mcp`
+        # installed. A bare "python" depends on PATH, which a launchd job does
+        # not have -- and this failed for every scheduled review until a live
+        # run with observations in the queue finally exercised it.
+        command=sys.executable,
         args=["-m", "app.main"],
         cwd=os.path.abspath(os.path.join(base_dir, folder)),
         env=None,

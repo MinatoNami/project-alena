@@ -344,6 +344,7 @@ def observations_for(
     *,
     include_duplicates: bool = False,
     unreviewed_only: bool = False,
+    retry_failed: bool = False,
     conn: Optional[sqlite3.Connection] = None,
 ) -> List[Dict[str, Any]]:
     conn = conn or get_connection()
@@ -351,12 +352,43 @@ def observations_for(
     if not include_duplicates:
         sql.append("AND o.duplicate_of IS NULL AND o.duplicate_reason IS NULL")
     if unreviewed_only:
-        sql.append(
+        # An errored review still counts as an attempt, so a permanently
+        # broken agent is not retried every run. `retry_failed` is the way
+        # back once the cause is fixed -- and `status` reports how many
+        # observations are sitting in that state, because otherwise it is
+        # silent.
+        clause = (
             "AND NOT EXISTS (SELECT 1 FROM engineering_reviews r"
-            " WHERE r.observation_id = o.id)"
+            " WHERE r.observation_id = o.id"
         )
+        if retry_failed:
+            clause += " AND r.verdict != 'error'"
+        sql.append(clause + ")")
     sql.append("ORDER BY o.id")
     return [dict(row) for row in conn.execute(" ".join(sql), (repository_id,))]
+
+
+def observations_with_failed_reviews(
+    repository_id: str, conn: Optional[sqlite3.Connection] = None
+) -> List[Dict[str, Any]]:
+    """Observations whose only reviews errored.
+
+    Stranded: they will not be picked up again without --retry-failed.
+    """
+    conn = conn or get_connection()
+    return [
+        dict(row)
+        for row in conn.execute(
+            "SELECT o.* FROM observations o WHERE o.repository_id = ?"
+            " AND o.duplicate_reason IS NULL"
+            " AND EXISTS (SELECT 1 FROM engineering_reviews r"
+            "             WHERE r.observation_id = o.id AND r.verdict = 'error')"
+            " AND NOT EXISTS (SELECT 1 FROM engineering_reviews r"
+            "                 WHERE r.observation_id = o.id AND r.verdict != 'error')"
+            " ORDER BY o.id",
+            (repository_id,),
+        )
+    ]
 
 
 def record_review(

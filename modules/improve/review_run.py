@@ -84,6 +84,7 @@ async def review_repository_async(
     repository: Repository,
     *,
     limit: Optional[int] = None,
+    retry_failed: bool = False,
     executor=None,
     conn=None,
 ) -> ReviewRun:
@@ -92,7 +93,7 @@ async def review_repository_async(
     run = ReviewRun(repository.id, agent="codex")
 
     observations = observations_for(
-        repository.id, unreviewed_only=True, conn=conn
+        repository.id, unreviewed_only=True, retry_failed=retry_failed, conn=conn
     )
     if limit:
         observations = observations[:limit]
