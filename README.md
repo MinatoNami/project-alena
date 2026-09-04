@@ -98,7 +98,7 @@ logs the attempt, and only then calls it.
 | [`modules/telegram`](modules/telegram/README.md) | Telegram bot gateway |
 | [`modules/voice-assistant`](modules/voice-assistant/backend/README.md) | Voice backend (FastAPI + WebSocket) and Nuxt frontend |
 | [`config/`](config) | `tool_policy.yaml` and `repositories.yaml` — who may call what, against which repo |
-| [`deploy/launchd`](deploy/launchd/README.md) | Scheduled scan, review, recommend and dashboard jobs |
+| [`deploy/launchd`](deploy/launchd/README.md) | The nightly cycle job, and the dashboard service |
 | [`scripts/`](scripts/README.md) | Start scripts for each service combination |
 | [`Documents/`](Documents) | Design documents and contracts |
 

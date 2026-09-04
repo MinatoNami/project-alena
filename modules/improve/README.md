@@ -566,7 +566,7 @@ Research       1 document(s) ingested
     Implemented, awaiting an outcome: none
 
 Scheduled
-    local.alena.scan: last run ok
+    local.alena.cycle: last run ok
     ...
 
 1 recommendation(s) need a decision:  alena-improve queue

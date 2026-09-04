@@ -702,7 +702,7 @@ def cmd_history(args: argparse.Namespace) -> int:
 
 
 def cmd_cycle(args: argparse.Namespace) -> int:
-    """Scan, ingest research, review and score — stopping at the gate."""
+    """Scan, ingest research, review, score, refresh — stopping at the gate."""
     registry = load_registry(args.registry)
     install_gateway(registry, args.policy)
     ensure_layout()
@@ -720,6 +720,11 @@ def cmd_cycle(args: argparse.Namespace) -> int:
         print(f"  {entry.describe()}")
         for title in entry.duplicates:
             print(f"    already outstanding: {title}")
+
+    if run.portfolio_error:
+        print(f"  portfolio refresh failed: {run.portfolio_error}")
+    elif run.portfolio:
+        print(f"  portfolio refreshed: {len(run.portfolio)} file(s)")
 
     print()
     if run.awaiting_decision:
