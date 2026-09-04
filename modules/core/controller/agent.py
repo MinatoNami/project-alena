@@ -9,11 +9,12 @@ from modules.core.controller.llm_client import ask_llm
 from modules.core.controller.normalize import normalize_codex_output
 from modules.core.controller.tool_executor import execute_tool
 from modules.core.controller.tool_definitions import get_tool_by_name
-from modules.core.tools.tool_capabilities import tool_can_handle
+from modules.core.tools.tool_capabilities import TOOL_CAPABILITIES, tool_can_handle
 from modules.core.controller.normalize import normalize_codex_output
 from modules.core.controller.logger import logger
 from modules.core.controller.memory import get_default_memory, ConversationMemory
 from modules.llm import LLMUnavailable
+from modules.gateway import ensure_discovered, get_gateway
 from modules.gateway.errors import GatewayDenied
 
 
@@ -43,11 +44,65 @@ def _build_server_config(mcp_server_key: str) -> SimpleNamespace:
     )
 
 
+def _catalog_entry(tool_name: str):
+    """The catalog's entry for a tool, or None if it has never heard of it."""
+    try:
+        return get_gateway().catalog.get(tool_name)
+    except Exception as exc:  # noqa: BLE001 - a broken catalog is not fatal here
+        logger.warning(f"Tool catalog unavailable for '{tool_name}': {exc!r}")
+        return None
+
+
 def _get_server_for_tool(tool_name: str) -> SimpleNamespace:
+    """The MCP server that implements `tool_name`.
+
+    The catalog answers first, because a discovered tool exists nowhere else.
+    Sending `repo.search` to the codex server -- which is what the "default to
+    codex" fallback below would do for anything the static table has not heard
+    of -- turns a perfectly good tool call into a baffling failure.
+    """
+    entry = _catalog_entry(tool_name)
+    if entry is not None and entry.contract.mcp_server:
+        return _build_server_config(entry.contract.mcp_server)
+
     tool_def = get_tool_by_name(tool_name)
     # Default to codex if unknown (keeps backward-compatibility)
     server_key = tool_def.mcp_server if tool_def else "codex"
     return _build_server_config(server_key)
+
+
+def _tool_can_handle(tool_name: str, intents: Set[str]) -> bool:
+    """Whether `tool_name` could satisfy the turn's inferred intents.
+
+    The capability table describes the static tools and only those. A
+    discovered tool has no entry and never will -- MCP carries no capability
+    vocabulary -- so a missing entry is not evidence against it, and treating
+    it as such would refuse every alena-core tool before it was ever called.
+
+    The gateway remains the authority on whether a call is permitted. This
+    heuristic exists only to stop the planner answering a clock question with
+    a code generator, and it can only judge the tools it actually describes.
+    """
+    if tool_name in TOOL_CAPABILITIES:
+        return tool_can_handle(tool_name, intents)
+    return _catalog_entry(tool_name) is not None
+
+
+async def _discover_tools() -> None:
+    """Put the discovered MCP tools in the catalog before the planner runs.
+
+    This is what the local model's `tools` array is built from, so it has to
+    happen before the first `ask_llm` rather than before the first tool call.
+    It costs one subprocess per process: `ensure_discovered` is a no-op once
+    the catalog is filled.
+    """
+    try:
+        discovered = await ensure_discovered()
+    except Exception as exc:  # noqa: BLE001 - the assistant answers regardless
+        logger.warning(f"Tool discovery failed: {exc!r}")
+        return
+    if discovered:
+        logger.info(f"TOOLS_DISCOVERED: {', '.join(sorted(discovered))}")
 
 
 def _parse_tool_call(response: str) -> Optional[dict]:
@@ -128,6 +183,7 @@ async def run_agent(
     a tool the policy will not give it, and the CLI and the controller both
     need that to come back as text rather than a traceback.
     """
+    await _discover_tools()
     try:
         return await _plan_and_act(
             user_input,
@@ -330,7 +386,7 @@ async def _plan_and_act(
                             f"Preprocessed {key}: replaced 'Z' with {timezone_offset}"
                         )
 
-        if not explicit_codex_request and not tool_can_handle(tool, intents):
+        if not explicit_codex_request and not _tool_can_handle(tool, intents):
             logger.warning(f"Tool '{tool}' cannot satisfy intents {intents}")
             emit(
                 "❌ I cannot complete this request with the available tools.\n"

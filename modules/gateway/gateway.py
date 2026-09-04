@@ -283,3 +283,23 @@ def set_gateway(gateway: Optional[ToolGateway]) -> None:
     """Replace the process-wide gateway. For tests and for the orchestrator."""
     global _gateway
     _gateway = gateway
+
+
+async def ensure_discovered(gateway: Optional[ToolGateway] = None) -> List[str]:
+    """Fill the catalog from MCP discovery, once per catalog.
+
+    `get_gateway()` can only build a catalog synchronously, so it registers the
+    static contracts and stops there. Discovery needs a running loop and a
+    subprocess, which makes it the caller's job -- and the caller is whoever is
+    about to plan a turn.
+
+    Returns the names discovered, or an empty list when the catalog already has
+    them. A server that will not start is logged by `discover_into` and leaves
+    the catalog unmarked, so the next turn tries again.
+    """
+    from .catalog import discover_into
+
+    gateway = gateway or get_gateway()
+    if gateway.catalog.discovered:
+        return []
+    return await discover_into(gateway.catalog)

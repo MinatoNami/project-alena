@@ -16,7 +16,13 @@ from .errors import (
     ToolNotDeclared,
     ToolNotRegistered,
 )
-from .gateway import Approval, ToolGateway, get_gateway, set_gateway
+from .gateway import (
+    Approval,
+    ToolGateway,
+    ensure_discovered,
+    get_gateway,
+    set_gateway,
+)
 from .grants import MAX_GRANTED_SIDE_EFFECT, ActionGrant, GrantBook
 from .policy import Policy, PolicyError, load_policy, parse_policy
 from .pool import MCPSessionPool, close_pool, get_pool
@@ -42,6 +48,7 @@ __all__ = [
     "ToolNotDeclared",
     "ToolNotRegistered",
     "close_pool",
+    "ensure_discovered",
     "get_gateway",
     "get_pool",
     "load_policy",

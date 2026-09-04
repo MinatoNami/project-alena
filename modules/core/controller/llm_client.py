@@ -1,6 +1,6 @@
 import os
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 from modules.core.controller.logger import logger
 from modules.llm import LLMChatClient, LLMConfig, LLMUnavailable
@@ -8,14 +8,44 @@ from modules.core.controller.tool_definitions import (
     generate_openai_tools,
     generate_system_prompt_tools_section,
 )
+from modules.gateway import get_gateway
 
 
-def build_system_prompt() -> str:
+def planner_tools(agent: str = "assistant") -> Tuple[List[Dict[str, Any]], str]:
+    """What `agent` may call, as (tools array, prompt section).
+
+    The catalog is the source of both. It holds every tool discovery has found
+    as well as the legacy static ones, filtered by the same policy that will
+    judge the call — so the planner is never shown a tool it would be refused
+    for asking about, and never hidden one it may have.
+
+    The static definitions survive as a fallback for a catalog that cannot be
+    built at all. A broken policy file should degrade the assistant to the
+    tools it had before the gateway existed, not silence it.
+    """
+    try:
+        catalog = get_gateway().catalog
+        tools = catalog.openai_tools(agent)
+        if tools:
+            return tools, catalog.system_prompt_section(agent)
+        logger.warning(
+            "Tool catalog offers %r nothing; falling back to the static tools", agent
+        )
+    except Exception as exc:  # noqa: BLE001 - the planner must still answer
+        logger.warning(
+            "Tool catalog unavailable (%r); falling back to the static tools", exc
+        )
+    return generate_openai_tools(), generate_system_prompt_tools_section()
+
+
+def build_system_prompt(tools_section: Optional[str] = None) -> str:
     """The planner prompt, built fresh so the clock is not frozen at import.
 
     The controller stays up for days; a datetime captured at import time would
     have the agent confidently reporting the day it was started.
     """
+    if tools_section is None:
+        tools_section = planner_tools()[1]
     return f"""You are ALENA, an AI planner.
 
 Current Date and Time: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
@@ -25,7 +55,7 @@ Rules:
 - You do NOT modify files directly.
 - You may request tools.
 
-{generate_system_prompt_tools_section()}
+{tools_section}
 
 Tool usage rules:
 - If the user explicitly asks to use a tool (e.g. "use codex", "using only codex tool"),
@@ -62,19 +92,25 @@ def _config() -> LLMConfig:
 _client = LLMChatClient(_config())
 
 
-def ask_llm(messages: List[Dict[str, Any]]) -> str:
+def ask_llm(messages: List[Dict[str, Any]], *, agent: str = "assistant") -> str:
     """Ask the planner. Returns prose, or tool-call JSON for the agent loop.
 
     Tool calls now go through the server's native tool-calling interface, so
     the reply is a `{"tool": ..., "arguments": {...}}` string only because
     LLMChatClient renders them that way — the model is no longer asked to
     hand-write JSON into its answer.
+
+    `agent` is the identity the policy filters by, and it has to be the same
+    one the call is later made under. Offering the planner a tool the gateway
+    then refuses is worse than not offering it: the model spends a turn on it
+    and reads the refusal as a failure to retry.
     """
+    tools, tools_section = planner_tools(agent)
     try:
         response = _client.chat(
             messages,
-            system_prompt=build_system_prompt(),
-            tools=generate_openai_tools(),
+            system_prompt=build_system_prompt(tools_section),
+            tools=tools,
         )
     except LLMUnavailable as exc:
         logger.error("LLM unavailable: %s", exc)

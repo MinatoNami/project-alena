@@ -66,6 +66,38 @@ def test_undeclared_tools_are_never_offered_to_a_planner():
     assert c.openai_tools("assistant") == []
 
 
+def test_the_prompt_section_lists_the_same_tools_as_the_array():
+    """The two must agree.
+
+    Native tool calling makes the prompt list redundant in principle, but local
+    models lean on it, and naming a tool there that the array withholds teaches
+    the model to ask for calls the policy will refuse.
+    """
+    c = catalog()
+    c.register(
+        [
+            ToolContract(
+                name="a",
+                input_schema={
+                    "type": "object",
+                    "properties": {
+                        "one": {"type": "string"},
+                        "two": {"type": "integer"},
+                    },
+                    "required": ["one"],
+                },
+            ),
+            ToolContract(name="gone"),
+            ToolContract(name="b"),
+        ]
+    )
+
+    assert c.system_prompt_section("assistant") == (
+        "Available tools:\n- a(one: string, two?: integer)\n- gone()"
+    )
+    assert [t["function"]["name"] for t in c.openai_tools("assistant")] == ["a", "gone"]
+
+
 def test_missing_tool_returns_none():
     assert catalog().get("nope") is None
 
@@ -139,6 +171,7 @@ async def test_alena_core_tools_are_discovered_and_all_declared(tmp_path, monkey
         await pool.aclose()
 
     assert discovered, "alena-core advertised no tools"
+    assert catalog.discovered, "a successful discovery must not run again"
     assert catalog.undeclared() == []
     assert catalog.unimplemented() == []
     assert all(catalog.get(name).contract.source == "mcp" for name in discovered)
@@ -161,3 +194,6 @@ async def test_a_server_that_will_not_start_does_not_take_the_catalog_with_it(
 
     assert await catalog_module.discover_into(catalog) == []
     assert catalog.names()  # the static tools are still there
+    # Unmarked, so the next turn tries again: one unlucky start should not cost
+    # the planner half its tools for the life of the process.
+    assert not catalog.discovered

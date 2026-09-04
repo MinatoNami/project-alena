@@ -36,9 +36,12 @@ The tool system has been refactored to use a **centralized, single-source-of-tru
    - Imports and uses definitions from `tool_definitions.py`
    - Used by safety checks to verify tool permissions
 
-4. **`llm_client.py`** - Auto-generated system prompt and tool schemas
-   - Imports tool descriptions from `tool_definitions.py`
-   - System prompt is dynamically generated with current tools
+4. **`llm_client.py`** - System prompt and tool schemas, from the catalog
+   - `planner_tools()` asks the Tool Gateway's catalog what the agent may call,
+     so discovered MCP tools reach the model and policy filters both the
+     `tools` array and the prompt
+   - `tool_definitions.py` is the fallback for a catalog that cannot be built
+     at all, not the normal path
 
 ## Adding a New MCP Server
 

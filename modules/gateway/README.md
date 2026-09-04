@@ -44,6 +44,28 @@ That is what makes "every tool declares its side effect" an enforced rule
 rather than a convention — `ToolCatalog.undeclared()` lists anything that has
 turned up without a policy entry.
 
+## The catalog is also what the planner is offered
+
+The same catalog that decides whether a call is allowed is what builds the
+`tools` array sent to LM Studio, filtered by the agent that will make the call:
+
+```
+ToolCatalog.openai_tools("assistant")   ──►  llm_client.ask_llm  ──►  LM Studio
+ToolCatalog.system_prompt_section(...)  ──►  the planner prompt
+```
+
+One source, so a planner is never shown a tool the policy will refuse it, and
+never hidden one it may have. The second is the failure that motivated this:
+alena-core's tools were discovered, declared and callable, and still invisible
+to ALENA's own planner, because the prompt was built from the static list.
+
+Discovery needs a running loop and a subprocess, so `get_gateway()` cannot do
+it — it registers the static contracts and stops. `ensure_discovered()` fills
+the rest, and the agent loop awaits it before the first `ask_llm` rather than
+before the first tool call: by tool-call time it is already too late for the
+model to have asked. It costs one subprocess per process, and a server that
+will not start leaves the catalog unmarked so the next turn tries again.
+
 ## Side effects
 
 Least to most consequential:

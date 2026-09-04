@@ -67,6 +67,11 @@ class ToolCatalog:
     def __init__(self, policy: Policy):
         self._policy = policy
         self._contracts: Dict[str, ToolContract] = {}
+        # True once MCP discovery has actually reached a server. The assistant
+        # checks it to decide whether to spend a subprocess on discovery again,
+        # so a failed attempt must leave it False -- one unlucky start should
+        # not silently cost the planner half its tools for the process's life.
+        self.discovered = False
 
     @property
     def policy(self) -> Policy:
@@ -128,13 +133,38 @@ class ToolCatalog:
 
         A planner should not be shown tools it will be refused for calling.
         """
-        tools: List[Dict[str, Any]] = []
-        for name in self.names():
-            tool_policy = self._policy.tool(name)
-            if tool_policy is None or not tool_policy.permits_agent(agent):
-                continue
-            tools.append(self._contracts[name].to_openai_tool())
-        return tools
+        return [
+            self._contracts[name].to_openai_tool() for name in self.callable_by(agent)
+        ]
+
+    def callable_by(self, agent: str) -> List[str]:
+        """The tools `agent` is permitted to call, in catalog order."""
+        return [
+            name
+            for name in self.names()
+            if (policy := self._policy.tool(name)) is not None
+            and policy.permits_agent(agent)
+        ]
+
+    def system_prompt_section(self, agent: str) -> str:
+        """The prompt's tool list, matching what `openai_tools` will offer.
+
+        Native tool calling makes this redundant in principle, but local models
+        lean on the prompt heavily, and a prompt that lists a different set from
+        the `tools` array teaches the model to ask for tools it will be refused.
+        """
+        lines = ["Available tools:"]
+        for name in self.callable_by(agent):
+            contract = self._contracts[name]
+            properties = (contract.input_schema or {}).get("properties", {}) or {}
+            required = set(contract.required_arguments())
+            args = [
+                f"{arg}{'' if arg in required else '?'}: "
+                f"{schema.get('type', 'any') if isinstance(schema, dict) else 'any'}"
+                for arg, schema in properties.items()
+            ]
+            lines.append(f"- {name}({', '.join(args)})")
+        return "\n".join(lines)
 
 
 # The MCP servers ALENA can discover tools from, as (key, folder) pairs. The
@@ -178,4 +208,6 @@ async def discover_into(catalog: "ToolCatalog", pool=None) -> List[str]:
             continue
         catalog.register(contracts)
         found.extend(c.name for c in contracts)
+    if found:
+        catalog.discovered = True
     return found
