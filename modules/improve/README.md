@@ -5,8 +5,21 @@ agent loop: this analyses *other* repositories and produces reviewed
 recommendations. It shares `modules/llm`, `modules/store` and the Tool Gateway,
 and nothing else.
 
-Status: **Phase 2** — research ingest and Codex engineering review. Nothing
-here writes to a repository.
+Status: **Phases 0–5 are in.** Repository intelligence, research ingest, two
+independent engineering reviewers with the Claude one behind an escalation
+predicate, a human approval gate, an action agent, portfolio intelligence, and
+the `alena-core` MCP server.
+
+This used to say "nothing here writes to a repository", which stopped being
+true when the action agent landed. One thing writes, and it is worth knowing
+exactly which: [`action/implement.py`](action/implement.py), on a branch, never
+on the default branch, only after a recommendation is `accepted`, under a grant
+scoped to one repository and dropped when the run ends. Pushing and opening a
+pull request are deliberately *not* part of it — they leave the machine, so
+they are separate steps with their own capability and their own approval.
+
+Not built: the Tool Builder (addendum §10–18). Its prerequisite is in place —
+`alena-improve tools` reports metrics from the audit log.
 
 ## The registry is the authority
 
@@ -733,7 +746,7 @@ modules/improve/
 ├── scan/              git, dependencies, TODOs, fingerprint
 ├── intelligence/      LM Studio summaries (best-effort)
 ├── research/          parse and ingest external research
-├── agents/            Codex engineering review, through the gateway
+├── agents/            both engineering reviewers, and what escalates to Claude
 ├── recommend/         dedup, scoring, synthesis, markdown
 ├── action/            the action agent, cross-review routing, test running
 ├── decide.py          the approval gate and its state machine
@@ -751,8 +764,8 @@ modules/improve/
 ```
 
 Capabilities are plain functions with typed inputs and outputs and no MCP
-imports. That is what keeps the Phase 5 MCP server a thin adapter rather than a
-rewrite — logic inside an `@mcp.tool()` body cannot be called from the CLI, a
+imports. That is what keeps the `alena-core` MCP server a thin adapter rather
+than a rewrite — logic inside an `@mcp.tool()` body cannot be called from the CLI, a
 worker, or a unit test.
 
 ## Tests
