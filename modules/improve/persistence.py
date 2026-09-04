@@ -578,17 +578,27 @@ def recommendations_for(
     conn: Optional[sqlite3.Connection] = None,
 ) -> List[Dict[str, Any]]:
     conn = conn or get_connection()
+    # The near-duplicate flag lives on the observation, and it is worth
+    # carrying here: it says the reviewer was asked whether this restated
+    # something and answered no. A reader deciding on the recommendation can
+    # then second-guess that call, which is the point of showing it at all.
+    # Named explicitly rather than `SELECT r.*, o.*` -- the two tables share
+    # id, title, body and created_at.
+    select = (
+        "SELECT r.*, o.near_duplicate_of AS near_duplicate_of,"
+        " o.near_duplicate_reason AS near_duplicate_reason"
+        " FROM recommendations r"
+        " LEFT JOIN observations o ON o.id = r.observation_id"
+        " WHERE r.repository_id = ?"
+    )
     if status:
         rows = conn.execute(
-            "SELECT * FROM recommendations WHERE repository_id = ? AND status = ?"
-            " ORDER BY score DESC, id",
+            f"{select} AND r.status = ? ORDER BY r.score DESC, r.id",
             (repository_id, status),
         )
     else:
         rows = conn.execute(
-            "SELECT * FROM recommendations WHERE repository_id = ?"
-            " ORDER BY score DESC, id",
-            (repository_id,),
+            f"{select} ORDER BY r.score DESC, r.id", (repository_id,)
         )
     return [dict(row) for row in rows]
 

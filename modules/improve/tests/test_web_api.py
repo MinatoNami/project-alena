@@ -137,6 +137,71 @@ def test_portfolio_and_tools_answer(client):
     assert isinstance(client.get("/api/tools").json(), list)
 
 
+def test_a_flagged_recommendation_carries_the_question_to_the_dashboard(
+    client, queued, repository
+):
+    """The reviewer already answered; the reader gets to second-guess it."""
+    from modules.store import get_connection
+
+    from modules.improve.persistence import (
+        observations_for,
+        upsert_recommendation,
+    )
+    from modules.improve.text import normalize_title
+
+    conn = get_connection()
+    # The real shape of this: two recommendations, one flagged as possibly
+    # restating the other. `near_duplicate_of` carries a foreign key, so the
+    # thing it points at has to exist.
+    ingest_text(
+        repository,
+        """# Research: sample
+
+Repository: sample
+Source: chatgpt-work
+
+## An earlier proposal
+
+Already accepted and waiting to be built.
+""",
+        use_embeddings=False,
+    )
+    flagged_observation = conn.execute(
+        "SELECT observation_id FROM recommendations WHERE id = ?", (queued,)
+    ).fetchone()[0]
+    second = next(
+        o
+        for o in observations_for("sample", include_duplicates=True)
+        if o["id"] != flagged_observation
+    )
+    other = upsert_recommendation(
+        repository_id="sample",
+        observation_id=second["id"],
+        title="An earlier proposal",
+        normalized_title=normalize_title("An earlier proposal"),
+        body="Already accepted and waiting to be built.",
+        status="accepted",
+    )
+    conn.execute(
+        "UPDATE observations SET near_duplicate_of = ?, near_duplicate_reason = ?"
+        " WHERE id = ?",
+        (other, f"recommendation #{other} is close — 0.83 similarity", flagged_observation),
+    )
+    conn.commit()
+
+    row = next(r for r in client.get("/api/queue").json() if r["id"] == queued)
+
+    assert row["near_duplicate_of"] == other
+    assert "0.83" in row["near_duplicate_reason"]
+
+
+def test_an_unflagged_recommendation_says_nothing(client, queued):
+    row = next(r for r in client.get("/api/queue").json() if r["id"] == queued)
+
+    assert row["near_duplicate_reason"] is None
+    assert row["near_duplicate_of"] is None
+
+
 # -- deciding --------------------------------------------------------------
 
 

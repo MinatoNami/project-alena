@@ -175,6 +175,11 @@ def _recommendation(row: Dict[str, Any]) -> Dict[str, Any]:
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
         "breakdown": _parse_breakdown(row),
+        # Present only when de-duplication flagged this and the reviewer
+        # judged it a distinct idea anyway. Absent for everything else, so
+        # the dashboard can show it without a second request.
+        "near_duplicate_reason": row.get("near_duplicate_reason"),
+        "near_duplicate_of": row.get("near_duplicate_of"),
     }
 
 

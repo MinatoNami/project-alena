@@ -314,6 +314,23 @@ const priorityClass = (p?: string) =>
           confidence {{ row.confidence === null ? 'unknown' : `${Math.round(row.confidence * 100)}%` }}
         </p>
 
+        <!--
+          Shown only when de-duplication was unsure and the reviewer said this
+          is a distinct idea. Deliberately understated: it is a resolved
+          question, not a warning. Loud styling here would have every reader
+          re-adjudicating a call that was already made, on a signal that is
+          wrong more often than not.
+        -->
+        <p
+          v-if="row.near_duplicate_reason"
+          class="mt-3 border-l-2 border-neutral-300 pl-3 text-xs text-neutral-500 dark:border-neutral-700"
+        >
+          A similarity check thought this might restate
+          <span v-if="row.near_duplicate_of">#{{ row.near_duplicate_of }}</span>
+          <span v-else>an earlier proposal</span>; the reviewer read both and judged it distinct.
+          <span class="mt-1 block">{{ row.near_duplicate_reason }}</span>
+        </p>
+
         <div class="mt-4 space-y-3">
           <section v-for="s in sections(row.body)" :key="s.name">
             <h3 class="text-xs font-semibold uppercase tracking-wide text-neutral-500">{{ s.name }}</h3>

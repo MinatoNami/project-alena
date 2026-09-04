@@ -64,4 +64,8 @@ export type Recommendation = {
   reason: string | null
   body: string | null
   breakdown: { priority?: string; dimensions?: Record<string, number> }
+  // Set when de-duplication thought this might restate something already
+  // proposed and the reviewer disagreed. Absent otherwise.
+  near_duplicate_reason?: string | null
+  near_duplicate_of?: number | null
 }
