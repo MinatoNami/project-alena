@@ -31,7 +31,11 @@ class GoogleCalendarClient:
     """Client for interacting with Google Calendar API"""
 
     def __init__(
-        self, credentials_path: Optional[str] = None, token_path: Optional[str] = None
+        self,
+        credentials_path: Optional[str] = None,
+        token_path: Optional[str] = None,
+        *,
+        interactive: bool = False,
     ):
         """
         Initialize the Google Calendar client
@@ -39,6 +43,12 @@ class GoogleCalendarClient:
         Args:
             credentials_path: Path to credentials.json file
             token_path: Path to token cache file
+            interactive: Allow the OAuth consent flow, which opens a browser
+                and blocks until somebody answers it. Off by default: this
+                class is constructed at import time by the MCP server, and
+                tool discovery now starts that server on any machine ALENA
+                runs on -- including a launchd job with nobody at the screen.
+                `scripts/check_credentials.py` is where consent belongs.
         """
         # Hardcode secrets folder path relative to this module
         module_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -49,6 +59,7 @@ class GoogleCalendarClient:
         )
         self.token_path = token_path or os.path.join(secrets_dir, "token.json")
         self.timezone = os.getenv("CALENDAR_TIMEZONE", "UTC")
+        self.interactive = interactive
         self.service = None
         self._authenticate()
 
@@ -69,6 +80,13 @@ class GoogleCalendarClient:
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
+            elif not self.interactive:
+                raise RuntimeError(
+                    f"No usable Google Calendar token at {self.token_path}. "
+                    "Run `python modules/mcp/google-calendar/scripts/"
+                    "check_credentials.py` once to authorise; it opens the "
+                    "consent screen and writes the token."
+                )
             else:
                 flow = InstalledAppFlow.from_client_secrets_file(
                     self.credentials_path, SCOPES

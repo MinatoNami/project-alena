@@ -69,6 +69,9 @@ logger = logging.getLogger(__name__)
 mcp = FastMCP("google-calendar-mcp")
 
 # Initialize calendar client
+# Never interactive: this runs at import, and importing this module is how
+# tool discovery lists the calendar tools. A consent screen opened here would
+# block a background process nobody is watching.
 try:
     calendar_client = GoogleCalendarClient()
 except Exception as e:
@@ -93,7 +96,9 @@ def google_list_events(
         max_results: Maximum number of events to return (default: 10)
 
     Returns:
-        A list of events with their details (id, summary, start, end, description, attendees)
+        Events grouped by date, each with its title, time range and id.
+        Descriptions and attendees are not included: use google_list_events to
+        find an event, then read the event itself for its detail.
     """
     # Handle empty calendar_id
     if not calendar_id or calendar_id.strip() == "":

@@ -13,6 +13,7 @@ rather than Ollama's. Two differences from that older client matter to callers:
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 from dataclasses import dataclass
@@ -56,6 +57,10 @@ class LLMConfig:
     @property
     def models_url(self) -> str:
         return f"{self.normalized_base_url()}/v1/models"
+
+    @property
+    def embeddings_url(self) -> str:
+        return f"{self.normalized_base_url()}/v1/embeddings"
 
 
 class LLMError(RuntimeError):
@@ -171,6 +176,50 @@ class LLMChatClient:
                 time.sleep(0.5)
 
         return ""
+
+    def embed(
+        self, inputs: List[str], *, model: Optional[str] = None
+    ) -> List[List[float]]:
+        """Embed one or more strings.
+
+        LM Studio serves `/v1/embeddings` only when an *embedding* model is
+        loaded, which is a different slot from the chat model -- so `model` is
+        an explicit argument here rather than reusing resolve_model(), which
+        would send the chat model's name and get a confusing 404.
+
+        Used for recommendation de-duplication: catching that a new proposal
+        is a reworded version of one that was already rejected.
+        """
+        if not inputs:
+            return []
+
+        payload: Dict[str, Any] = {"input": list(inputs)}
+        resolved = model or os.getenv("LLM_EMBEDDING_MODEL", "")
+        if resolved:
+            payload["model"] = resolved
+
+        try:
+            with self._client(httpx.Timeout(self._config.timeout_s)) as client:
+                response = client.post(self._config.embeddings_url, json=payload)
+                response.raise_for_status()
+                data = response.json()
+        except httpx.HTTPError as exc:
+            raise LLMUnavailable(f"LM Studio embeddings request failed: {exc}") from exc
+
+        rows = data.get("data") if isinstance(data, dict) else None
+        if not isinstance(rows, list):
+            raise LLMUnavailable(f"Unexpected embeddings response: {data!r}")
+
+        # The API does not promise ordered rows; each carries its own index.
+        vectors: List[List[float]] = [[] for _ in inputs]
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            index = row.get("index", 0)
+            vector = row.get("embedding")
+            if isinstance(vector, list) and 0 <= index < len(vectors):
+                vectors[index] = [float(value) for value in vector]
+        return vectors
 
 
 class LLMAsyncClient:

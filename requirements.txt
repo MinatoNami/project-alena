@@ -16,3 +16,6 @@ python-telegram-bot>=20.7
 google-auth>=2.28
 google-auth-oauthlib>=1.2
 google-api-python-client>=2.120
+
+# Gateway tool policy and repository registry are YAML (see Documents/).
+PyYAML>=6.0

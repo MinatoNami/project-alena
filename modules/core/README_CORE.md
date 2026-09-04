@@ -105,18 +105,30 @@ await run_agent(
 
 ## 🛡 Safety Model
 
-Safety is enforced **before execution**:
+Enforcement lives in the **Tool Gateway** (`modules/gateway/`), which every
+tool call goes through. Before a tool runs, the gateway checks that it is in
+the catalog, that its arguments are complete, that this agent may call it
+against this repository, that any path argument stays inside its allowed root,
+and that a human has agreed where the policy demands it. Every attempt is
+recorded, refusals included.
 
-- Allowed repo paths are whitelisted
-- Tool schemas are strictly validated
-- No filesystem access without explicit approval
-- Designed to support future diff-only gates
+This is worth stating plainly because it was not true before. `safety.py` and
+`tool_registry.validate_tool_call` were written and tested, and then nothing
+ever called them; the only live check was `tool_can_handle`. Putting the
+gateway *on* the executor's path, rather than beside it, is what stops that
+recurring — see `modules/core/tests/test_executor_gateway.py`, which asserts
+the call path rather than just the behaviour.
 
-This prevents the agent from:
+Two caveats on current scope:
 
-- Escaping project boundaries
-- Modifying unintended files
-- Executing malformed tool calls
+- `ALENA_ALLOWED_REPO_ROOTS` is empty by default, so path checking is off
+  until Phase 1's repository registry supplies real workspace roots.
+- Every `requires_approval` in the shipped policy is `false`. The gate turns
+  on in Phase 4, when there is a human flow to approve through.
+
+`safety.check_repo_path` still carries a hardcoded personal sandbox path and
+is superseded by the registry; it is kept only so its existing test keeps
+passing.
 
 ---
 

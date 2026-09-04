@@ -1,0 +1,46 @@
+# The test suite is where several of ALENA's rules are actually enforced.
+#
+#   test_alena_core_tools_are_discovered_and_all_declared  a tool cannot ship
+#     without a policy entry, and a policy entry cannot outlive its tool
+#   test_server.py (alena-core)                            every tool on the
+#     server a client reaches directly stays read-only
+#   test_executor_gateway.py                               the executor keeps
+#     going through the gateway, rather than quietly detaching again
+#
+# Each was written to "fail the build". Until this file existed there was no
+# build to fail, and five stale calendar tests sat red long enough that nobody
+# noticed. That is what this is for.
+
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # The version developed against, and one behind it. README claims 3.10+;
+        # that floor is not exercised here, so treat it as a claim, not a fact.
+        python-version: ["3.12", "3.14"]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - run: pip install -r requirements.txt
+
+      # No .env, no ~/.alena, no LM Studio, no Codex CLI. The suite is expected
+      # to pass without any of them: anything that needs a database builds one
+      # under tmp_path, and the tests that need a live model are behind
+      # RUN_INTEGRATION_TESTS.
+      - run: pytest -q

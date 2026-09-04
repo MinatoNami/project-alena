@@ -188,3 +188,97 @@ async def test_stream_chat_yields_content_without_the_scratchpad():
     client = _async_client(handler, model="loaded-model")
     out = [d async for d in client.stream_chat([{"role": "user", "content": "hi"}])]
     assert "".join(out) == "Hi there"
+
+
+# --- embeddings -------------------------------------------------------------
+
+
+def _embedding_client(handler, **config):
+    return LLMChatClient(
+        LLMConfig(base_url="http://lm.test", **config),
+        transport=httpx.MockTransport(handler),
+    )
+
+
+def test_embed_returns_one_vector_per_input():
+    def handler(request):
+        payload = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"index": i, "embedding": [float(i), 0.5]}
+                    for i in range(len(payload["input"]))
+                ]
+            },
+        )
+
+    vectors = _embedding_client(handler).embed(["a", "b"])
+
+    assert vectors == [[0.0, 0.5], [1.0, 0.5]]
+
+
+def test_embed_puts_vectors_back_in_input_order():
+    """The API does not promise ordered rows; each carries its own index."""
+
+    def handler(request):
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {"index": 1, "embedding": [9.0]},
+                    {"index": 0, "embedding": [1.0]},
+                ]
+            },
+        )
+
+    assert _embedding_client(handler).embed(["first", "second"]) == [[1.0], [9.0]]
+
+
+def test_embed_hits_the_embeddings_endpoint_not_chat():
+    seen = {}
+
+    def handler(request):
+        seen["url"] = str(request.url)
+        return httpx.Response(200, json={"data": [{"index": 0, "embedding": [1.0]}]})
+
+    _embedding_client(handler).embed(["a"])
+
+    assert seen["url"] == "http://lm.test/v1/embeddings"
+
+
+def test_embed_sends_the_embedding_model_not_the_chat_model(monkeypatch):
+    """They are separate slots in LM Studio; sending the chat model 404s."""
+    monkeypatch.setenv("LLM_EMBEDDING_MODEL", "nomic-embed-text")
+    seen = {}
+
+    def handler(request):
+        seen["payload"] = json.loads(request.content)
+        return httpx.Response(200, json={"data": [{"index": 0, "embedding": [1.0]}]})
+
+    _embedding_client(handler, model="qwen3-chat").embed(["a"])
+
+    assert seen["payload"]["model"] == "nomic-embed-text"
+
+
+def test_embed_of_nothing_calls_nothing():
+    def handler(request):  # pragma: no cover - must not be reached
+        raise AssertionError("embed([]) should not make a request")
+
+    assert _embedding_client(handler).embed([]) == []
+
+
+def test_embed_reports_an_unreachable_server():
+    def handler(request):
+        return httpx.Response(503)
+
+    with pytest.raises(LLMUnavailable, match="embeddings"):
+        _embedding_client(handler).embed(["a"])
+
+
+def test_embed_rejects_a_response_it_cannot_read():
+    def handler(request):
+        return httpx.Response(200, json={"error": "no embedding model loaded"})
+
+    with pytest.raises(LLMUnavailable, match="Unexpected"):
+        _embedding_client(handler).embed(["a"])

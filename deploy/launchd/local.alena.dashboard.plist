@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The dashboard. Unlike the other agents this is a service, not a scheduled
+  job: KeepAlive with RunAtLoad, and no StartCalendarInterval.
+
+  One process. The API serves the built dashboard from the same port, so
+  nothing node-shaped runs here and the browser is same-origin. Build it once
+  before loading this:
+
+    cd modules/improve/dashboard && npm install && npm run generate
+
+  It binds to loopback. It can approve a recommendation, and an approved
+  recommendation is what authorises the action agent to write to a repository.
+
+  Replace /Users/YOU with your path before installing.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>local.alena.dashboard</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/YOU/git-repos/project-alena/scripts/start_alena_dashboard.sh</string>
+    <string>--serve</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+
+  <!-- Do not restart faster than this if it is crashing on startup. -->
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+
+  <key>StandardOutPath</key>
+  <string>/Users/YOU/.alena/logs/dashboard.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/YOU/.alena/logs/dashboard.log</string>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/YOU/git-repos/project-alena</string>
+</dict>
+</plist>

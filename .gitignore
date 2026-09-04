@@ -71,3 +71,13 @@ pnpm-debug.log*
 token.json
 token.pickle
 credentials.json
+
+# ---- ALENA generated state ----
+# The gateway audit log and the orchestrator's intelligence artifacts. Both
+# grow on every run and default to ~/.alena, but keep the in-repo paths out
+# in case they are pointed here.
+.alena/
+alena-intelligence/
+*.db
+*.db-wal
+*.db-shm

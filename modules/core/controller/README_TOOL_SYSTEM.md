@@ -1,5 +1,19 @@
 # Tool System Architecture
 
+> **Superseded.** `tool_definitions.py` is no longer where tools are declared,
+> and no longer where the running system gets them. The Tool Interoperability
+> Standard makes the MCP definition the canonical contract, and
+> `config/tool_policy.yaml` the place where permissions live. Discovery now
+> covers Codex and Google Calendar as well as alena-core, so every tool in a
+> healthy catalog arrives over MCP; this file is the fallback for a server that
+> will not start, plus the capability table the agent loop's intent heuristic
+> reads. It goes away when that heuristic does.
+>
+> **Adding a tool today:** implement it on an MCP server and declare it in
+> `config/tool_policy.yaml`. See [modules/gateway/README.md](../../gateway/README.md).
+> The instructions below still describe how the legacy definitions work, and
+> still apply to the tools already in that file.
+
 ## Overview
 
 The tool system has been refactored to use a **centralized, single-source-of-truth** approach for defining tools and their capabilities. This makes it easy to add new MCP servers and their tools without having to update multiple files.
@@ -14,19 +28,19 @@ The tool system has been refactored to use a **centralized, single-source-of-tru
    - Defines tool capabilities using enums
    - Provides helper functions to generate formats for other modules
 
-2. **`tool_registry.py`** - Auto-generated registry
+2. **`tool_capabilities.py`** - Auto-generated capabilities
 
    - Imports and uses definitions from `tool_definitions.py`
-   - Validates tool calls against required arguments
+   - Feeds the agent loop's intent heuristic, which can only judge the tools
+     this file describes. Not a permission check — the Tool Gateway is the
+     authority on whether a call is allowed
 
-3. **`tool_capabilities.py`** - Auto-generated capabilities
-
-   - Imports and uses definitions from `tool_definitions.py`
-   - Used by safety checks to verify tool permissions
-
-4. **`llm_client.py`** - Auto-generated system prompt and tool schemas
-   - Imports tool descriptions from `tool_definitions.py`
-   - System prompt is dynamically generated with current tools
+3. **`llm_client.py`** - System prompt and tool schemas, from the catalog
+   - `planner_tools()` asks the Tool Gateway's catalog what the agent may call,
+     so discovered MCP tools reach the model and policy filters both the
+     `tools` array and the prompt
+   - `tool_definitions.py` is the fallback for a catalog that cannot be built
+     at all, not the normal path
 
 ## Adding a New MCP Server
 

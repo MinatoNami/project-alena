@@ -1,5 +1,6 @@
 import json
 import os
+import sys
 
 from typing import Callable, Optional, Set
 from types import SimpleNamespace
@@ -8,11 +9,13 @@ from modules.core.controller.llm_client import ask_llm
 from modules.core.controller.normalize import normalize_codex_output
 from modules.core.controller.tool_executor import execute_tool
 from modules.core.controller.tool_definitions import get_tool_by_name
-from modules.core.tools.tool_capabilities import tool_can_handle
+from modules.core.tools.tool_capabilities import TOOL_CAPABILITIES, tool_can_handle
 from modules.core.controller.normalize import normalize_codex_output
 from modules.core.controller.logger import logger
 from modules.core.controller.memory import get_default_memory, ConversationMemory
 from modules.llm import LLMUnavailable
+from modules.gateway import ensure_discovered, get_gateway
+from modules.gateway.errors import GatewayDenied
 
 
 def _build_server_config(mcp_server_key: str) -> SimpleNamespace:
@@ -24,21 +27,110 @@ def _build_server_config(mcp_server_key: str) -> SimpleNamespace:
         folder = mcp_server_key
 
     return SimpleNamespace(
-        command="python",
+        # sys.executable, not "python": an MCP server needs the same
+        # interpreter as its caller, because that is the one with `mcp`
+        # installed. A bare "python" depends on PATH, which a launchd job does
+        # not have -- and this failed for every scheduled review until a live
+        # run with observations in the queue finally exercised it.
+        command=sys.executable,
         args=["-m", "app.main"],
         cwd=os.path.abspath(os.path.join(base_dir, folder)),
-        env=None,
+        # Unbuffered, so the server's progress on stderr reaches whoever is
+        # watching while the work happens rather than after it.
+        env={**os.environ, "PYTHONUNBUFFERED": "1"},
         encoding="utf-8",
         encoding_error_handler="replace",
         stderr_to_stdout=False,
     )
 
 
+def _catalog_entry(tool_name: str):
+    """The catalog's entry for a tool, or None if it has never heard of it."""
+    try:
+        return get_gateway().catalog.get(tool_name)
+    except Exception as exc:  # noqa: BLE001 - a broken catalog is not fatal here
+        logger.warning(f"Tool catalog unavailable for '{tool_name}': {exc!r}")
+        return None
+
+
 def _get_server_for_tool(tool_name: str) -> SimpleNamespace:
+    """The MCP server that implements `tool_name`.
+
+    The catalog answers first, because a discovered tool exists nowhere else.
+    Sending `repo.search` to the codex server -- which is what the "default to
+    codex" fallback below would do for anything the static table has not heard
+    of -- turns a perfectly good tool call into a baffling failure.
+    """
+    entry = _catalog_entry(tool_name)
+    if entry is not None and entry.contract.mcp_server:
+        return _build_server_config(entry.contract.mcp_server)
+
     tool_def = get_tool_by_name(tool_name)
     # Default to codex if unknown (keeps backward-compatibility)
     server_key = tool_def.mcp_server if tool_def else "codex"
     return _build_server_config(server_key)
+
+
+def _record_gate_refusal(tool_name: str, arguments: dict, intents: Set[str]) -> None:
+    """Record the one refusal the audit trail never saw.
+
+    Every gateway denial is recorded with a reason code, counted, and reported
+    by `alena-improve tools`. This heuristic sits in front of the gateway and
+    refused silently, so there has never been a way to ask the obvious
+    question: does it prevent mistakes, or only cause them? Recorded as a
+    denial with its own reason so that the existing metrics can answer it.
+    """
+    try:
+        get_gateway().audit.record(
+            tool=tool_name,
+            agent="assistant",
+            outcome="denied",
+            arguments=arguments,
+            denial_reason=f"capability_heuristic:{','.join(sorted(intents)) or 'none'}",
+        )
+    except Exception as exc:  # noqa: BLE001 - never fail a turn over bookkeeping
+        logger.warning(f"Could not record a capability refusal: {exc!r}")
+
+
+def _tool_can_handle(
+    tool_name: str, intents: Set[str], arguments: Optional[dict] = None
+) -> bool:
+    """Whether `tool_name` could satisfy the turn's inferred intents.
+
+    The capability table describes the static tools and only those. A
+    discovered tool has no entry and never will -- MCP carries no capability
+    vocabulary -- so a missing entry is not evidence against it, and treating
+    it as such would refuse every alena-core tool before it was ever called.
+
+    The gateway remains the authority on whether a call is permitted. This
+    heuristic exists only to stop the planner answering a clock question with
+    a code generator, and it can only judge the tools it actually describes.
+    """
+    if tool_name in TOOL_CAPABILITIES:
+        allowed = tool_can_handle(tool_name, intents)
+    else:
+        allowed = _catalog_entry(tool_name) is not None
+
+    if not allowed:
+        _record_gate_refusal(tool_name, arguments or {}, intents)
+    return allowed
+
+
+async def _discover_tools() -> None:
+    """Put the discovered MCP tools in the catalog before the planner runs.
+
+    This is what the local model's `tools` array is built from, so it has to
+    happen before the first `ask_llm` rather than before the first tool call.
+    It costs one subprocess per process: `ensure_discovered` is a no-op once
+    the catalog is filled.
+    """
+    try:
+        discovered = await ensure_discovered()
+    except Exception as exc:  # noqa: BLE001 - the assistant answers regardless
+        logger.warning(f"Tool discovery failed: {exc!r}")
+        return
+    if discovered:
+        logger.info(f"TOOLS_DISCOVERED: {', '.join(sorted(discovered))}")
 
 
 def _parse_tool_call(response: str) -> Optional[dict]:
@@ -113,6 +205,39 @@ async def run_agent(
     output_sink: Optional[Callable[[str], None]] = None,
     return_output: bool = False,
 ):
+    """Plan and act on one user turn.
+
+    A gateway refusal is an answer, not a crash: the planner regularly asks for
+    a tool the policy will not give it, and the CLI and the controller both
+    need that to come back as text rather than a traceback.
+    """
+    await _discover_tools()
+    try:
+        return await _plan_and_act(
+            user_input,
+            memory,
+            tool_executor,
+            output_sink=output_sink,
+            return_output=return_output,
+        )
+    except GatewayDenied as exc:
+        message = (
+            "❌ I cannot complete this request with the available tools.\n"
+            f"Reason: {exc}"
+        )
+        logger.warning(f"GATEWAY_REFUSED_TURN: {exc.reason_code} - {exc}")
+        (output_sink or print)(message)
+        return message if return_output else None
+
+
+async def _plan_and_act(
+    user_input: str,
+    memory: Optional[ConversationMemory] = None,
+    tool_executor: Optional[Callable] = None,
+    *,
+    output_sink: Optional[Callable[[str], None]] = None,
+    return_output: bool = False,
+):
     memory = memory or _memory
     tool_executor = tool_executor or execute_tool
     text = user_input.lower()
@@ -159,7 +284,9 @@ async def run_agent(
             logger.info(f"TOOL_REQUEST (fallback): tool={tool} arguments={arguments}")
 
             intents = infer_intents(user_input)
-            if not explicit_codex_request and not tool_can_handle(tool, intents):
+            if not explicit_codex_request and not _tool_can_handle(
+                tool, intents, arguments
+            ):
                 logger.warning(f"Tool '{tool}' cannot satisfy intents {intents}")
                 emit(
                     "❌ I cannot complete this request with the available tools.\n"
@@ -191,7 +318,9 @@ async def run_agent(
             if "access_filesystem" in intents:
                 tool = "codex_analyze"
                 arguments = {"repo_path": ".", "question": user_input}
-                if not explicit_codex_request and not tool_can_handle(tool, intents):
+                if not explicit_codex_request and not _tool_can_handle(
+                    tool, intents, arguments
+                ):
                     logger.warning(f"Tool '{tool}' cannot satisfy intents {intents}")
                     emit(
                         "❌ I cannot complete this request with the available tools.\n"
@@ -289,7 +418,9 @@ async def run_agent(
                             f"Preprocessed {key}: replaced 'Z' with {timezone_offset}"
                         )
 
-        if not explicit_codex_request and not tool_can_handle(tool, intents):
+        if not explicit_codex_request and not _tool_can_handle(
+            tool, intents, arguments
+        ):
             logger.warning(f"Tool '{tool}' cannot satisfy intents {intents}")
             emit(
                 "❌ I cannot complete this request with the available tools.\n"
@@ -345,13 +476,52 @@ async def run_agent(
 
         tool_steps += 1
         if tool_steps >= max_tool_steps:
-            emit("❌ Reached tool step limit. Please refine the request or try again.")
+            # Ending the turn here used to throw away the result of the call
+            # that tripped the limit, and answer an error. The budget is on
+            # tool calls, not on the turn -- so spend the last step asking for
+            # prose instead, and let the model say what it could not finish.
+            try:
+                final_message = ask_llm(
+                    [
+                        *memory.get_messages(),
+                        {
+                            "role": "user",
+                            "content": (
+                                "No more tool calls are available for this "
+                                "turn. Answer now from the tool results above."
+                            ),
+                        },
+                    ],
+                    with_tools=False,
+                )
+            except LLMUnavailable as exc:
+                emit(f"❌ Inference server unavailable: {exc}")
+                return done()
+
+            if not final_message.strip():
+                # Emit-only, like the other failure paths: an empty string is
+                # not an answer to hand back to a caller.
+                final_message = None
+                emit(
+                    "❌ Reached tool step limit. "
+                    "Please refine the request or try again."
+                )
+                return done()
+
+            memory.add_assistant(final_message)
+            emit("\n✅ Final answer:\n" + final_message)
             return done()
 
+        # Asking for "a tool call JSON" here contradicts the system prompt,
+        # which tells the model to use the tool-calling interface. Given both,
+        # a model splits the difference and writes prose that *describes* a
+        # call -- which parses as an answer, so the chain ends one step short
+        # of the thing the user asked for.
         followup = (
-            "Use the tool result above to continue. "
-            "If another tool call is required, respond with a tool call JSON. "
-            "Otherwise, provide the final answer."
+            "Use the tool result above to continue. If you need another tool, "
+            "call it through the tool interface. Otherwise give the final "
+            "answer. Do not describe a tool call in your reply: either make "
+            "the call or answer."
         )
         try:
             current_response = ask_llm(

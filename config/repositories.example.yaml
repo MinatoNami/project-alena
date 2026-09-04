@@ -1,0 +1,50 @@
+# ALENA repository registry
+#
+# The authoritative answer to where a repository lives, which branch matters,
+# and what agents may do to it. Agents are never handed a path they chose
+# themselves -- they are handed a workspace resolved from here.
+#
+# Copy to config/repositories.yaml and edit. Never put a token in this file:
+# the loader rejects anything token-shaped, because this file is checked in.
+#
+# Capability defaults are asymmetric on purpose. research/analyze/plan default
+# to true, because a repository you registered is one you want looked at.
+# modify/create_branch/create_pr/merge default to false, and `merge` cannot
+# become true by omission.
+
+repositories:
+  - id: project-alena
+    name: Project ALENA
+    source:
+      provider: github
+      url: https://github.com/MinatoNami/project-alena.git
+      default_branch: main
+    workspace:
+      path: /Users/lionelchong/git-repos/project-alena
+    enabled: true
+    capabilities:
+      research: true
+      analyze: true
+      plan: true
+      modify: false
+      create_branch: false
+      create_pr: false
+      merge: false
+    agents:
+      research:
+        - chatgpt-work
+      engineering:
+        - codex
+        - claude-code
+      implementation:
+        - claude-code
+        - codex
+    schedule:
+      repository_scan: nightly
+      research: weekly
+      architecture_review: weekly
+    tags:
+      - python
+      - mcp
+      - agents
+      - voice

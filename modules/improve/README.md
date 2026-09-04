@@ -1,0 +1,797 @@
+# alena-improve
+
+The autonomous codebase improvement orchestrator. Separate from the assistant's
+agent loop: this analyses *other* repositories and produces reviewed
+recommendations. It shares `modules/llm`, `modules/store` and the Tool Gateway,
+and nothing else.
+
+Status: **Phases 0–5 are in.** Repository intelligence, research ingest, two
+independent engineering reviewers with the Claude one behind an escalation
+predicate, a human approval gate, an action agent, portfolio intelligence, and
+the `alena-core` MCP server.
+
+This used to say "nothing here writes to a repository", which stopped being
+true when the action agent landed. One thing writes, and it is worth knowing
+exactly which: [`action/implement.py`](action/implement.py), on a branch, never
+on the default branch, only after a recommendation is `accepted`, under a grant
+scoped to one repository and dropped when the run ends. Pushing and opening a
+pull request are deliberately *not* part of it — they leave the machine, so
+they are separate steps with their own capability and their own approval.
+
+Not built: the Tool Builder (addendum §10–18). Its prerequisite is in place —
+`alena-improve tools` reports metrics from the audit log.
+
+## The registry is the authority
+
+Agents are never handed a filesystem path they chose themselves. Every run
+starts by resolving a declared target through `config/repositories.yaml`:
+
+```
+alena-improve scan luma-index
+        │
+        ▼
+  Repository Registry
+        │
+        ├── unknown  → refuse
+        ├── disabled → refuse
+        ├── capability not granted → refuse
+        │
+        └── resolved workspace  ──►  scan
+```
+
+The registry's workspaces are also what the gateway accepts as path arguments
+(`modules/improve/wiring.py`). That is the real answer to the question
+`safety.py` tried to answer with one hardcoded path.
+
+Capability defaults are asymmetric on purpose:
+
+| | Default | Why |
+|---|---|---|
+| `research`, `analyze`, `plan` | `true` | A repository you registered is one you want looked at |
+| `modify`, `create_branch`, `create_pr` | `false` | The cost of guessing wrong runs one way |
+| `merge` | `false`, and cannot become true by omission | Unrecoverable |
+
+The loader refuses anything token-shaped anywhere in the file. The registry is
+checked in, so it is exactly the file someone will paste a token into.
+
+## The scan
+
+Trigger B from the spec — the nightly local pass, LM Studio only.
+
+```
+git state ──► fingerprint ──► changed?
+                                 │
+                        no ──────┴────── yes
+                         │                │
+                       skip          languages, dependencies,
+                    (no model)       TODO delta, summaries
+                                          │
+                                          ▼
+                              SQLite + alena-intelligence/
+```
+
+The fingerprint covers HEAD, the branch **and** the working tree, because a
+repository sitting on uncommitted work has moved even though HEAD has not. An
+unchanged repository costs a handful of git commands and never reaches the
+model — which is the point, since the nightly run touches every repository
+whether or not anything happened.
+
+Summaries are best-effort. An unattended run must still produce its structural
+output when LM Studio is asleep, so a summary failure is logged and the scan
+continues.
+
+TODO deltas key on `path + marker + text`, deliberately not the line number: a
+TODO that moved because something above it changed is the same TODO, and
+counting it as resolved-and-reintroduced every night would drown the signal.
+
+## The weekly loop
+
+```
+ChatGPT Work (its own schedule)
+        │  research/<repo>/<date>.md
+        ▼
+   ingest-research ──► observations ──► dedup ──► skipped if already proposed
+        │
+        ▼
+     review  ──► Codex, read-only, through the gateway
+        │
+        ▼
+   review --agent claude ──► only what clears an escalation threshold
+        │
+        ▼
+   recommend  ──► scored ──► recommendations/<repo>/latest.md
+                                │
+                        rejected by review
+                                │
+                     recorded, so it is recognised next time
+```
+
+### Two reviewers, and when the second one is worth buying
+
+Codex reviews everything new. Claude reviews only what justifies it — the spec
+is explicit that forty observations should become ten candidates, then four,
+and only those four are worth a second frontier model.
+
+`agents/triggers.py` is that filter: a pure function over recorded facts, no
+I/O and no model call, because it is the only thing standing between a
+research feed and a subscription. Any one condition is enough:
+
+| Condition | Why |
+|---|---|
+| score ≥ 0.70 | worth getting right |
+| reviewer confidence < 0.60 | the first opinion was not a confident one |
+| changes architecture | expensive to undo |
+| security-sensitive | expensive to be wrong about |
+| effort LARGE | expensive to build |
+| reviewers already disagree | that is what a third look is for |
+
+A candidate nobody has reviewed is never escalated — that would spend the
+expensive reviewer on triage. A candidate the first reviewer *confidently*
+rejected is not escalated on score alone; rejecting what does not fit is the
+reviewer doing its job.
+
+Repository tags (`security`, `vulnerability-management`) escalate by default,
+but only when no reviewer expressed an opinion. A reviewer that looked and
+said "not security-sensitive" beats the tag — otherwise every candidate in a
+security product escalates and the cost control is gone for exactly the
+repository that generates the most of them.
+
+Every escalation records which condition fired, so the thresholds can be tuned
+against which ones turned out to be worth it:
+
+```bash
+scripts/alena_improve.sh review luma-index --agent claude --dry-run
+# luma-index: claude: 1 reviewed, 1 below the escalation threshold, 50% of 2 escalated
+#   would escalate: Local OCR for scanned PDFs — score 0.88 >= 0.70
+```
+
+`--retry-failed` re-attempts escalations whose previous review errored; without
+it a failure counts as attempted, so a broken endpoint is not retried on every
+run forever.
+
+### Containment differs between the two reviewers
+
+Codex is held by the Tool Gateway: it runs as an identity the policy grants
+read-only tools, so a hijacked review cannot write. A Claude routine runs on
+Anthropic's side and the gateway has no say there — the containment is
+narrower and worth stating plainly. ALENA sends text and parses text; the
+routine cannot reach ALENA's tools, repositories or database. What a routine
+may do in *its* environment is configured where the routine is defined.
+
+**The routine client has not been run against a live endpoint.** It speaks an
+explicit contract (POST a prompt; take an answer, or a job id to poll) and
+reads responses tolerantly. If the real envelope differs, `extract_text` in
+`agents/claude_review.py` is the single place to adjust.
+
+**Not having a routine is a supported state.** The escalation pass checks for
+`CLAUDE_ROUTINE_URL` once, and if it is missing it does nothing and records
+nothing:
+
+```
+luma-index: claude: no routine configured, so nothing was escalated and
+nothing was recorded.
+```
+
+That the check is up front rather than per candidate matters more than it
+looks. Recording an errored `claude` review against each candidate would count
+as an attempt, and an attempted candidate is never escalated again — so an
+unconfigured routine would quietly disqualify every candidate it touched,
+including from the escalation that runs after a routine is finally set up.
+`--retry-failed` would be the only way back, and nobody would know to reach
+for it.
+
+Everything else works without a routine: scanning, research, Codex review,
+scoring, the approval gate and the action agent.
+
+Which is why there is a check. After setting `CLAUDE_ROUTINE_URL`, run it
+before trusting anything else:
+
+```bash
+scripts/alena_improve.sh check-routine
+```
+
+It sends one trivial prompt that explicitly asks for no work, and separates
+three failures that look identical from the outside: the URL is not set, the
+endpoint cannot be reached, and the endpoint answered in a shape the client
+cannot read. Finding out which during a Thursday 02:00 escalation is the worst
+available time.
+
+### Proposing something yourself
+
+Research was the only way in, so somebody with an idea of their own had
+nowhere to put it. `propose` is that input — a form in the dashboard, or:
+
+```bash
+scripts/alena_improve.sh propose luma-index "Cache cover mosaics on disk" \
+  --body "The reader regenerates them on every load…"
+```
+
+It is **not a shortcut**. A proposal is de-duplicated, put to the engineering
+reviewer, scored and returned for the same human decision. Skipping review for
+ideas that came from a person would mean the review only ever scrutinises the
+suggestions nobody is attached to.
+
+What differs is the framing, and it is a third case rather than a softer
+version of the other two:
+
+| Origin | Framing | Risk being guarded against |
+|---|---|---|
+| Research | quarantined data, instructions inside it ignored | injection |
+| A `--focus` steer | an instruction to follow | — |
+| A proposal | a claim to judge, refusal explicitly invited | **agreement** |
+
+A proposal is not untrusted — it came through an interface only the operator
+can reach, so quarantining it would be theatre. The risk runs the other way: a
+reviewer saying yes because of who asked. So the prompt spends its words
+inviting refusal. An observation with no recorded origin gets the cautious
+framing.
+
+It works. Asked about a real proposal, Codex answered *"Rejected. The
+observation's premise is false"* and cited the four files showing why.
+
+### One cycle, stopping at the gate
+
+```bash
+scripts/alena_improve.sh cycle --all
+```
+
+Scan, ingest whatever research has been dropped, review what is new, score it
+— then stop. Those four are always run in that order and are useless out of
+it, so running them as one thing removes an ordering nobody should have to
+remember.
+
+**It never implements.** Everything a cycle does is reading, thinking, and
+writing to ALENA's own state. The first thing that touches a repository is
+behind a recorded human decision, and putting it on the end of a command that
+also refreshes scans would be a way around that.
+
+Research is read from `~/alena-research/<repository-id>/`, one directory per
+repository, so a document cannot be attributed to the wrong repository by
+sitting in the wrong place. `ALENA_RESEARCH_DIR` moves the drop point.
+
+### Nothing outstanding is raised twice
+
+De-duplication at ingest compares against every recommendation in any state
+and every observation still awaiting review, so an idea that is already
+accepted and waiting to be built is skipped rather than added again. What it
+reports is *what is outstanding*, because that is what you act on:
+
+```
+already accepted and awaiting implementation [recommendation #4, matched on …]
+already proposed and awaiting your decision  [recommendation #7, matched on …]
+already rejected — not this quarter          [recommendation #2, matched on …]
+```
+
+The reviewer is a second line for the same thing: it is handed the rejected
+list and asked whether the observation restates one. On a real run it
+answered *"This is not a restatement of either previously rejected
+proposal"* — which is the layer that covers for a missing embedding model.
+
+## Reading the research
+
+```bash
+scripts/alena_improve.sh research              # what is on record
+scripts/alena_improve.sh research --id 3       # one document in full
+```
+
+Every document is also written to
+`alena-intelligence/research/<repository-id>/<date>.md` — named for the date
+it covers rather than the date it was ingested, so a report fetched late
+files itself under the week it is about. The database has the content too,
+but a database row is not something you read on a Sunday.
+
+The dashboard has a page for it: each document expands to show the markdown,
+the file it was written to, and the observations that came out of it.
+Rendering is deliberately not a markdown-to-HTML library — research is
+written by an external agent reading the public internet, and handing it to
+something that emits HTML would put attacker-authored markup in the
+dashboard. Text is rendered through Vue's interpolation, which escapes it,
+and only `http`/`https` URLs become links.
+
+## Steering a run
+
+A manual scan or review takes a free-text steer — from the dashboard, or
+`--focus` on the CLI:
+
+```bash
+scripts/alena_improve.sh review --all --focus "only the storage layer"
+```
+
+It is deliberately handled the opposite way to research text. Research arrives
+from an external agent reading the public internet and is framed as data to be
+judged; a steer arrives from the person running ALENA, through an interface
+only they can reach, and is framed as an instruction to follow. It is also
+placed *before* the observation block, because an instruction inside the
+quarantined region would be quarantined along with it.
+
+Only `scan` and `review` take one. A command that has no use for a steer
+refuses it rather than dropping it silently — a steer that vanishes is worse
+than one that is rejected.
+
+### Research is untrusted input
+
+The research document is written by an external agent reading the public
+internet, and it ends up in front of a coding agent. See
+[the contract](../../Documents/RESEARCH_DOCUMENT_CONTRACT.md) for the full
+reasoning; the short version is that the gateway is what contains it. The
+review runs as agent `codex`, whose tool policy grants read-only tools only,
+so a hijacked review still cannot write. Prompt framing is the third line of
+defence, not the first.
+
+### De-duplication
+
+Three layers, checked at ingest rather than after review, because reviewing a
+proposal that was already turned down is the expensive half of the mistake:
+
+| Layer | Catches | Needs |
+|---|---|---|
+| Normalized title | Reordering and rewording of the heading | nothing |
+| Token overlap | Near-verbatim restatement | nothing |
+| Embedding cosine | Genuine paraphrase | an embedding model loaded |
+
+A match above its threshold is **skipped silently**, which is why the
+thresholds are cautious: a false positive throws away a real idea with nobody
+seeing it. That caution costs something at the other end — the two LumaIndex
+proposals to move off Nuxt 3 scored 0.83 against a 0.90 bar, and both reached
+the queue for a human to spot.
+
+So cosine has a second, lower bar. Between 0.80 and 0.90 an observation is
+**flagged rather than skipped**: it is reviewed as normal, and the reviewer is
+told what it resembles and asked to decide. That band exists because the
+honest answer there is not a decision but a question, and the reviewer can
+read both proposals and answer it.
+
+The flag is worded to be easy to disagree with. A similarity score presented
+as evidence gets deferred to, and the expensive mistake is not missing a
+duplicate — the reviewer sees the full prior list anyway — it is rejecting a
+good idea because a number implied it should. Only cosine feeds the band;
+token and title near-misses are mostly ideas sharing vocabulary, and flagging
+those would teach the reviewer to skim past the flag.
+
+LM Studio serves embeddings only when an embedding model occupies its
+embedding slot, which is separate from the chat slot. With that slot empty —
+the usual state of an install set up for chat — layers 1 and 2 still run, and
+a genuine paraphrase can reach review. What catches it then is the list of
+what has already been proposed, which goes into the reviewer prompt with where
+each idea stands and why. That list covers open and accepted recommendations
+as well as rejected ones -- an idea already waiting to be built is as much a
+duplicate as one that was turned down, and showing only the rejections let a
+reworded "Nuxt 3 is in maintenance" past a reviewer that had already approved
+"Nuxt 4 is the supported line". Set `LLM_EMBEDDING_MODEL` and load one to
+close the gap properly.
+
+### Scoring
+
+The spec's weights, as data in `recommend/scoring.py` so they can later be
+fitted to acceptance history. Evidence and novelty are derived rather than
+judged — evidence counts what the document actually cited, novelty is one
+minus similarity to something already proposed. The rest come from the review.
+
+A missing dimension defaults to 0.5, not 0: a candidate whose review failed
+should land mid-table where a human sees it, not at the bottom where nobody
+looks.
+
+## The approval gate
+
+Nothing becomes code without a recorded human decision.
+
+```
+recommend ──► recommended ──┬──► accepted ──┬──► implemented ──┬──► successful
+                            │           ▲   │                  ├──► unsuccessful
+                            │           │   └──► abandoned     └──► abandoned
+                            │           └──────── (retry) ─────────────┘
+                            └──► rejected ──► (revisit) ──► recommended
+```
+
+The transitions are a closed set, not an UPDATE anyone can make, and decisions
+are appended rather than overwritten — "accepted, then abandoned three weeks
+later" is a different fact from "abandoned", and only one of them survives an
+overwrite.
+
+Two of them can be walked back. A rejection made when the product was less
+mature is exactly the kind that gets reconsidered, so `rejected` can be
+revisited. And a failed attempt is a fact about the attempt, not about the
+idea, so `unsuccessful` can go back to `accepted` to be attempted again —
+without that, the first bad implementation buries a good recommendation for
+good.
+
+The move to `implemented` is the one decision an agent makes rather than a
+human, and it records only that the branch exists. Whether the change was any
+good is `successful` / `unsuccessful`, and that stays the human's call — a run
+whose tests failed still lands on `implemented`, because "it was built" and
+"it worked" are different claims. A run that fails outright leaves the
+recommendation `accepted`, so it can simply be attempted again.
+
+A rejection or an abandonment **requires** a reason. That is not paperwork: the
+reason goes into the context package, the next reviewer's prompt, and
+de-duplication. A rejection without one means the same idea arrives next month
+with nothing to recognise it by.
+
+The report's `[ ] Accept` block stays a view. `alena-improve decide` is what
+records anything.
+
+## The action agent
+
+The only thing in ALENA that writes to a repository, and every one of these has
+to hold before it starts:
+
+| Gate | Why |
+|---|---|
+| `capabilities.modify` and `create_branch` in the registry | opt-in per repository |
+| recommendation status is `accepted` | a human said so |
+| working tree completely clean, untracked files included | the commit stages everything |
+| a fresh `alena/<id>-<slug>` branch | the base branch is never committed to |
+
+### Permission lasts one run
+
+Accepting a recommendation issues an `ActionGrant`: scoped to one repository,
+capped at `repository_write`, carrying the recommendation id as its authority,
+and dropped in a `finally` when the run ends. A grant that outlives its run is
+a standing write permission nobody remembers issuing.
+
+Two limits make a grant safe to hand out. It **satisfies** the approval the
+policy demands; it never adds a tool the policy would refuse — an agent outside
+`allowed_agents` stays refused with a grant in hand. And it is **capped at
+`repository_write`**, so it can authorise a branch and a commit but never a
+push, a pull request, an infrastructure change or anything destructive. Those
+leave the machine or cannot be undone, and each needs its own explicit human
+act rather than riding along with "yes, implement this".
+
+Approval is now per agent in `tool_policy.yaml`. A user asking the assistant to
+edit a file *is* the approval; an autonomous run needs an accepted
+recommendation. Same tool, different answer:
+
+```yaml
+codex_edit:
+  allowed_agents: ["assistant", "action-agent"]
+  requires_approval: ["action-agent"]
+```
+
+### Nothing is pushed
+
+There is no push and no pull-request step. The agent leaves a branch with a
+commit, the tests it could run, and an independent review of the diff. Merging
+is yours.
+
+### Cross review
+
+The spec wants the opposite model to review, so no model both proposes and
+blesses its own work. Writing to a repository means running a tool on this
+machine through the gateway, and the only agent wired that way is Codex — a
+Claude routine can read a diff but cannot commit to a workspace here. So the
+pairing is currently fixed rather than alternating: **Codex implements, Claude
+reviews.** The independent-check property holds, which is the part that
+matters, and `action/routing.py` is data so the rotation starts working when
+Claude gains a local write path.
+
+### Tests are found where the change is
+
+A monorepo keeps its manifests in subdirectories. LumaIndex has
+`frontend/package.json` and `backend/pytest.ini` and nothing at the root, and
+looking only at the root found neither — so the first live implementation went
+to review reporting "tests not run", which reads as *there were no tests*
+rather than *nobody looked*.
+
+Suites are now found by walking up from the changed files to the nearest
+manifest, so a frontend edit runs the frontend suite and not the backend one,
+and a change spanning both runs both. Any suite failing fails the run.
+
+### Build artifacts stay out of the commit
+
+The implementing agent runs the tests while it works, and everything left in
+the workspace would otherwise be staged. A branch destined for review should
+not carry `__pycache__`, `.pytest_cache` or `node_modules`, so staging is by
+path with a short list of universally-generated names filtered out. A run that
+produced *only* artifacts counts as having changed nothing.
+
+### On failure, nothing is left behind
+
+A failed run reverts tracked files, removes what the agent created, returns to
+the base branch and deletes its own branch. Removing untracked files is safe
+*because* of the pre-flight check: the tree was completely clean before the run,
+so anything untracked afterwards is the agent's own output. The implementation
+row is written before any of this, so a half-finished branch can still be found.
+
+## Portfolio intelligence
+
+The spec's ambition here is a system that notices Text Whisperer already has
+transcription before the health app grows its own. That needs semantic
+understanding of what each repository *does*, which is a later problem.
+
+What is available now is deterministic and still useful. Every repository has
+been scanned, so their languages, dependencies and tags are known facts, and
+three things fall out of comparing them:
+
+**Shared technology** — who would be affected by the same framework release.
+
+**Divergent pins** — the same dependency specified differently in two places.
+Nobody decided that; it accumulated. Cosmetic differences are normalised away
+(`>=23.0,<24.0` and `>=23,<24` are one pin written twice), so what remains is
+real: across the four registered repositories, `nuxt` is a major version behind
+in one of them and `cryptography` differs by two.
+
+**Work that travels** — a recommendation accepted for one repository, in a
+technology another one also uses. Rejections deliberately do not travel: a
+rejection is a judgement about one repository's circumstances, and suggesting a
+neighbour adopt something you turned down is worse than saying nothing.
+
+Nothing here is written into the recommendations table. A cross-repository
+finding is an observation for a human; turning one into a recommendation
+automatically would let it skip the review every other recommendation goes
+through.
+
+## Exposed over MCP
+
+[`modules/mcp/alena-core`](../mcp/alena-core/README.md) puts all of this behind
+one MCP server, so Claude, ChatGPT, a local model and this CLI reach one
+implementation rather than three provider-specific integrations. Every tool
+there is read-only, and a test asserts it — a client reaching that server talks
+to it directly, with the gateway nowhere in the path.
+
+`modules/improve/query.py` holds the functions; the server only adapts them.
+
+## A browser, if you prefer one
+
+```bash
+scripts/start_alena_dashboard.sh     # API on 9100, Nuxt on 3100
+```
+
+Status, the approval queue, repositories, portfolio and tool metrics, with
+accept, reject and implement in the queue, and a button per pipeline step on
+the status page. It binds to loopback, and every gate in front of implementing
+sits below the dashboard rather than in it.
+See [dashboard/README.md](dashboard/README.md).
+
+## Using it day to day
+
+Two commands cover it.
+
+```bash
+scripts/alena_improve.sh status     # where is everything, what needs me
+scripts/alena_improve.sh queue      # what is proposed, why, and how to answer
+```
+
+`status` counts what is sitting at each hand-off and how long it has been
+sitting. The ages are the useful part: "3 awaiting decision" is a working
+system, "3 awaiting decision, oldest 24 days" is a queue nobody is reading.
+
+```
+Repositories   4/4 scanned, last scan 0d ago
+Research       1 document(s) ingested
+
+    Observations awaiting review: none
+    Reviewed, awaiting scoring: none
+    Recommendations awaiting your decision: 1
+    Accepted, awaiting implementation: none
+    Implemented, awaiting an outcome: none
+
+Scheduled
+    local.alena.scan: last run ok
+    ...
+
+1 recommendation(s) need a decision:  alena-improve queue
+```
+
+Every hand-off in the pipeline is somewhere work can quietly stop, and a
+stalled stage looks exactly like a quiet week. Three things get called out
+rather than left to be noticed: a stage whose oldest item has passed its
+staleness threshold, a scheduled job whose last run failed, and observations
+whose only review errored — those will not be retried on their own, so
+`status` names them and prints the flag that picks them back up.
+
+`queue` is the approval view. Each recommendation with its score, its
+evidence, the reviewers' verdicts, and the exact commands to accept or
+reject it. `--full` prints the whole body rather than the condensed sections.
+
+## Commands
+
+```bash
+scripts/alena_improve.sh scan --all          # nightly pass
+scripts/alena_improve.sh scan luma-index     # one repository
+scripts/alena_improve.sh scan --all --force  # ignore the fingerprint
+scripts/alena_improve.sh scan --all --no-llm # structure only, no summaries
+scripts/alena_improve.sh repos               # what is declared
+scripts/alena_improve.sh show luma-index     # the latest scan
+scripts/alena_improve.sh audit               # recent gateway invocations
+scripts/alena_improve.sh where               # which files are actually in use
+
+scripts/alena_improve.sh context luma-index                    # write .context/
+scripts/alena_improve.sh ingest-research luma-index r.md       # take a report
+scripts/alena_improve.sh ingest-research luma-index --from-dir ~/drop
+scripts/alena_improve.sh review luma-index                     # Codex, read-only
+scripts/alena_improve.sh check-routine                         # is Claude wired up?
+scripts/alena_improve.sh review luma-index --agent claude --dry-run
+scripts/alena_improve.sh review luma-index --agent claude      # second opinion
+scripts/alena_improve.sh recommend luma-index                  # score and report
+
+scripts/alena_improve.sh status                                # the whole picture
+scripts/alena_improve.sh queue                                 # decide on things
+scripts/alena_improve.sh pending                               # just the titles
+scripts/alena_improve.sh decide luma-index 3 --accept
+scripts/alena_improve.sh decide luma-index 4 --reject --reason "too early"
+scripts/alena_improve.sh implement luma-index 3                # writes a branch
+scripts/alena_improve.sh trail luma-index 3                    # what happened
+scripts/alena_improve.sh decide luma-index 3 --successful \
+    --actual-effort LARGE --observed-value 0.8
+
+scripts/alena_improve.sh portfolio                             # the whole picture
+scripts/alena_improve.sh portfolio --capability whisper        # who already has it
+```
+
+The last one closes the loop the spec asks for: estimated against actual
+effort, expected against observed value. None of it can be recovered after the
+fact, and it is what the scoring weights get fitted to later.
+
+Every trigger is a subcommand rather than a scheduler inside the application:
+launchd survives reboots, a subcommand can be re-run by hand when something
+looks wrong, and the same entry point is what the tests call.
+
+Nightly, via launchd:
+
+```xml
+<key>ProgramArguments</key>
+<array>
+  <string>/Users/you/git-repos/project-alena/scripts/alena_improve.sh</string>
+  <string>scan</string>
+  <string>--all</string>
+</array>
+<key>StartCalendarInterval</key>
+<dict><key>Hour</key><integer>2</integer><key>Minute</key><integer>0</integer></dict>
+```
+
+## Times
+
+Records are written in UTC with an explicit offset, and that does not change:
+it is what makes the history sortable as plain strings and keeps the database
+meaningful read from anywhere. What changed is the reading.
+
+`ALENA_TIMEZONE` (default `Asia/Singapore`) is applied at the edge — the CLI,
+the generated markdown, and the dashboard, which is served the same value so
+a browser in another country still agrees with the terminal.
+
+This is not cosmetic. The nightly scan runs at 02:01 in Singapore and is
+stored as `18:01` the previous day; reading the stored number is how you
+conclude the job never ran.
+
+## What has actually happened
+
+```bash
+scripts/alena_improve.sh history                    # everything, newest first
+scripts/alena_improve.sh history luma-index
+scripts/alena_improve.sh history --kind review --kind decision
+```
+
+The record already existed, spread across five tables that each answer a
+different question. `history.py` assembles them into the one question none of
+them could answer alone: *what has happened here, in order.*
+
+Scans and reviews are the bulk of it; research, decisions and implementations
+are included because a review with no visible outcome is half a story. The
+useful reading is "this was reviewed, then rejected, then proposed again", and
+that needs all five to be legible.
+
+Events that went the unhappy way — a rejection, a failed implementation, an
+errored review — are marked once, in one place, so every consumer agrees on
+what counts as bad news.
+
+There is a page for it in the dashboard, grouped by day and filterable by
+repository and kind.
+
+## Are the tools earning their place?
+
+```bash
+scripts/alena_improve.sh tools
+scripts/alena_improve.sh tools --attention     # only what needs looking at
+```
+
+Computed from the gateway's audit log, which has been recording every
+invocation since Phase 0. Four verdicts:
+
+| Verdict | Meaning |
+|---|---|
+| `healthy` | used, and mostly working |
+| `failing` | more than a quarter of calls that reached it errored |
+| `contested` | more than a quarter were *refused* |
+| `unused` | never called, and there is enough history for that to mean something |
+| `unproven` | never called, but the log is too thin to conclude anything |
+
+`contested` is the one to watch. An agent repeatedly reaching for a capability
+the policy will not give it is the signal the addendum's tool-proposal
+lifecycle is meant to act on: either the catalog is missing something, or the
+policy is wrong about who should have it.
+
+The `unproven` distinction exists because a young audit log looks exactly like
+a catalog full of dead tools, and advising someone to retire nineteen working
+tools because a test database has two rows is confidently wrong. Both enough
+calls and enough days are required before an absence counts as evidence.
+
+Two of the addendum's dimensions are **not** measured, and the code says so
+rather than approximating them. *Token savings* would mean comparing against
+the reconstruction a tool replaced, and nothing records what an agent would
+have done instead. *Accuracy* cannot be seen at all — a tool returning
+something wrong looks exactly like one returning something right. So the
+utility score is about use and reliability, not value: it answers "is this
+earning its place in the catalog", not "is this tool good".
+
+## Running it unattended
+
+[`deploy/launchd/`](../../deploy/launchd/README.md) has templates for the
+spec's weekly cadence — nightly scan, Wednesday review, Thursday
+recommendations. Nothing is installed for you: a launchd job is a persistent
+change that starts running software on a timer.
+
+Two things are deliberately absent from every template, and there are tests
+asserting it. `implement` writes to a repository and requires a recorded human
+acceptance, so putting it on a timer would give the approval gate a way
+around itself. And a live Claude escalation stays a deliberate act until you
+have watched its rate in dry-run for a while.
+
+## Where things live
+
+| | Default | Override |
+|---|---|---|
+| Registry | `config/repositories.yaml` | `ALENA_REPOSITORIES` |
+| Workspace root | *(unset)* | `ALENA_WORKSPACE_ROOT` |
+| Database | `~/.alena/alena.db` | `ALENA_DB_PATH` |
+| Generated artifacts | `~/.alena/intelligence` | `ALENA_INTELLIGENCE_DIR` |
+
+`alena-improve where` prints the resolved paths, which is the first thing to
+check when a run reads the wrong config.
+
+## Layout
+
+```
+modules/improve/
+├── registry/          repositories.yaml -> Repository, resolution, capabilities
+├── scan/              git, dependencies, TODOs, fingerprint
+├── intelligence/      LM Studio summaries (best-effort)
+├── research/          parse and ingest external research
+├── agents/            both engineering reviewers, and what escalates to Claude
+├── recommend/         dedup, scoring, synthesis, markdown
+├── action/            the action agent, cross-review routing, test running
+├── decide.py          the approval gate and its state machine
+├── portfolio.py       the capability graph and what repositories share
+├── status.py          where work is sitting, and what is stuck
+├── query.py           read-only queries, the MCP server's whole substance
+├── text.py            shared normalisation (owned by neither, to avoid a cycle)
+├── context_package.py the .context/ bundle every agent reads
+├── persistence.py     SQLite reads and writes
+├── artifacts.py       alena-intelligence/ layout and markdown rendering
+├── scan_run.py        one repository scan
+├── review_run.py      review and recommend orchestration
+├── wiring.py          registry -> gateway allowed roots
+└── cli.py             alena-improve
+```
+
+Capabilities are plain functions with typed inputs and outputs and no MCP
+imports. That is what keeps the `alena-core` MCP server a thin adapter rather
+than a rewrite — logic inside an `@mcp.tool()` body cannot be called from the CLI, a
+worker, or a unit test.
+
+## Tests
+
+```bash
+pytest modules/improve -v
+```
+
+The scanner tests run against a real git repository built in `tmp_path`. A
+faked `git` would only prove the fake behaves as expected.
+
+## What is deliberately not built
+
+The addendum's **Tool Builder** — agents proposing, building and promoting
+their own tools — is not here, and the reason is the order it has to happen
+in.
+
+The creation thresholds it specifies ("the same operation three times",
+"more than 5,000 tokens saved per run") are not opinions, they are
+measurements. Nothing could evaluate them until the audit log had run for a
+while, which is why metrics came first and why they honestly report that token
+savings is one of the things they cannot see.
+
+So the honest position is that Stage 5 of the long-term vision — *agents
+measure tool effectiveness* — is now possible, and Stages 6 and 7 wait on
+having something real to measure. The `contested` verdict is where a genuine
+tool proposal will come from: a capability agents keep reaching for and being
+refused. Building the promotion lifecycle before anything has produced that
+signal would mean guessing at what tools to build a factory for.
