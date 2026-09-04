@@ -129,6 +129,17 @@ tools:
     side_effect: read_only
     allowed_agents: ["*"]
 
+  # The doorway to alena-core's resources, for clients that have no way to read
+  # a resource -- which includes ALENA's own planner, since an OpenAI-compatible
+  # tools array is the only channel a local model has.
+  resource.list:
+    side_effect: read_only
+    allowed_agents: ["*"]
+
+  resource.read:
+    side_effect: read_only
+    allowed_agents: ["*"]
+
 # Per-repository overrides. Deny always beats allow. A repository with no entry
 # here inherits whatever the tool policy above permits.
 #

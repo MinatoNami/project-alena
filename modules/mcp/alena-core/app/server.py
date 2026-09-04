@@ -135,6 +135,66 @@ def portfolio_dependency_divergence() -> str:
 
 
 # ---------------------------------------------------------------------------
+# The doorway: resources, for a client that cannot read resources
+# ---------------------------------------------------------------------------
+#
+# The split above is right, and it is also why ALENA's own planner could not
+# read any of this. A local model reached through LM Studio's OpenAI-compatible
+# API has exactly one channel -- the tools array -- and no notion of a resource
+# at all. Claude and ChatGPT could read a repository's architecture; the
+# assistant the architecture belongs to could not.
+#
+# So: one doorway, not one tool per resource. The resources stay resources, and
+# a client that understands them still reads them directly. Both tools delegate
+# to the server's own registry rather than repeating the URI list, so there is
+# no second place to keep in step.
+
+
+@mcp.tool(name="resource.list")
+async def resource_list() -> str:
+    """List the readable context this server exposes, with its URIs."""
+    try:
+        resources = await mcp.list_resources()
+        templates = await mcp.list_resource_templates()
+        return _dump(
+            {
+                "resources": [
+                    {
+                        "uri": str(item.uri),
+                        "name": item.name,
+                        "description": item.description,
+                    }
+                    for item in resources
+                ],
+                "templates": [
+                    {
+                        "uri_template": item.uriTemplate,
+                        "name": item.name,
+                        "description": item.description,
+                    }
+                    for item in templates
+                ],
+            }
+        )
+    except Exception as exc:  # noqa: BLE001
+        return _error(exc)
+
+
+@mcp.tool(name="resource.read")
+async def resource_read(uri: str) -> str:
+    """Read one resource by URI. Call resource.list first to see what exists.
+
+    Templated URIs are filled in before calling: a profile is read at
+    `alena://repositories/<repository_id>/profile`, not at the template.
+    """
+    try:
+        contents = await mcp.read_resource(uri)
+        return "\n".join(str(item.content) for item in contents)
+    except Exception as exc:  # noqa: BLE001
+        return _error(exc)
+
+
+# ---------------------------------------------------------------------------
 # Resources: stable context
 # ---------------------------------------------------------------------------
 

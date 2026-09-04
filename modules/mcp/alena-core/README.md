@@ -47,10 +47,27 @@ read is an executable action makes every client treat it as one.
 | `recommendation.search` | Recommendations by text, repository and status |
 | `portfolio.search_capability` | Which repositories already use a technology |
 | `portfolio.dependency_divergence` | The same dependency pinned differently |
+| `resource.list` | The resources above, with their URIs |
+| `resource.read` | One resource, by URI |
 
 `memory.search` is the one worth reaching for first. Asking it before
 proposing something is how an agent finds out the idea was already turned
 down, and why.
+
+## The doorway
+
+The resource/tool split is right, and it is also why ALENA's own planner could
+not read any of the resources. A local model reached through LM Studio's
+OpenAI-compatible API has exactly one channel — the tools array — and no notion
+of a resource at all. Claude and ChatGPT could read a repository's
+architecture; the assistant whose architecture it is could not.
+
+`resource.list` and `resource.read` are the doorway. One pair of tools that
+says "read a resource", rather than one tool per resource: the resources stay
+resources, a client that understands them still reads them directly, and
+nothing above is duplicated. Both delegate to the server's own registry, so a
+resource added to this file appears through the doorway without anyone
+remembering to register it twice.
 
 ## Read-only by construction
 
@@ -59,10 +76,11 @@ Gateway is not in that path and cannot be — the gateway governs ALENA's own
 agents, not whoever else holds the server's address.
 
 So the safety property is structural rather than enforced at call time: every
-tool here reads, none writes. `config/tool_policy.yaml` declares all eight as
-`read_only`, and `tests/test_server.py` asserts it. Adding a tool that writes
-fails the build, which is the point — that decision should be a conversation,
-not a commit.
+tool here reads, none writes — the doorway included, which can only reach
+resources, and every resource is a read. `config/tool_policy.yaml` declares all
+ten as `read_only`, and `tests/test_server.py` asserts it. Adding a tool that
+writes fails the build, which is the point — that decision should be a
+conversation, not a commit.
 
 Anything that changes a repository lives behind the approval gate in
 `modules/improve/`, reached through the CLI, where a human decision and a

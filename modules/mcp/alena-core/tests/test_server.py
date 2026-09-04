@@ -41,6 +41,8 @@ EXPECTED_TOOLS = {
     "repo.get_dependencies": ["repository_id"],
     "repo.get_history": ["repository_id"],
     "repo.search": ["pattern", "repository_id"],
+    "resource.list": [],
+    "resource.read": ["uri"],
 }
 
 EXPECTED_RESOURCES = {
@@ -150,6 +152,34 @@ def test_an_unscanned_repository_says_what_to_run():
         list(asyncio.run(mcp.read_resource("alena://repositories/nope/profile")))[0].content
     )
     assert "message" in payload
+
+
+def test_the_doorway_lists_every_resource_and_template():
+    """One tool that says "read a resource", not one tool per resource.
+
+    It delegates to the server's own registry, so a resource added above shows
+    up here without anyone remembering to add it twice.
+    """
+    listed = call("resource.list", {})
+
+    assert {r["uri"] for r in listed["resources"]} == EXPECTED_RESOURCES
+    assert {t["uri_template"] for t in listed["templates"]} == EXPECTED_TEMPLATES
+
+
+def test_the_doorway_reads_a_templated_resource():
+    result = asyncio.run(
+        mcp.call_tool("resource.read", {"uri": "alena://repositories"})
+    )
+    payload = json.loads(result[0][0].text)
+
+    assert isinstance(payload, list)
+
+
+def test_the_doorway_returns_a_structured_error_for_an_unknown_uri():
+    result = asyncio.run(mcp.call_tool("resource.read", {"uri": "alena://nope"}))
+    payload = json.loads(result[0][0].text)
+
+    assert payload["error"]
 
 
 def test_registry_tags_are_known_before_anything_is_scanned():
