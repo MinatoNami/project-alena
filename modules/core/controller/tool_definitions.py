@@ -355,14 +355,6 @@ def generate_system_prompt_tools_section() -> str:
     return "\n".join(lines)
 
 
-def get_tool_registry() -> Dict[str, Dict[str, Any]]:
-    """Generate tool registry format"""
-    registry = {}
-    for tool in TOOL_DEFINITIONS:
-        registry[tool.name] = {"required_args": tool.get_required_arg_names()}
-    return registry
-
-
 def get_tool_capabilities_dict() -> Dict[str, Dict[str, bool]]:
     """Generate tool capabilities format"""
     capabilities = {}

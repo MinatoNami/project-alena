@@ -28,17 +28,14 @@ The tool system has been refactored to use a **centralized, single-source-of-tru
    - Defines tool capabilities using enums
    - Provides helper functions to generate formats for other modules
 
-2. **`tool_registry.py`** - Auto-generated registry
+2. **`tool_capabilities.py`** - Auto-generated capabilities
 
    - Imports and uses definitions from `tool_definitions.py`
-   - Validates tool calls against required arguments
+   - Feeds the agent loop's intent heuristic, which can only judge the tools
+     this file describes. Not a permission check — the Tool Gateway is the
+     authority on whether a call is allowed
 
-3. **`tool_capabilities.py`** - Auto-generated capabilities
-
-   - Imports and uses definitions from `tool_definitions.py`
-   - Used by safety checks to verify tool permissions
-
-4. **`llm_client.py`** - System prompt and tool schemas, from the catalog
+3. **`llm_client.py`** - System prompt and tool schemas, from the catalog
    - `planner_tools()` asks the Tool Gateway's catalog what the agent may call,
      so discovered MCP tools reach the model and policy filters both the
      `tools` array and the prompt
