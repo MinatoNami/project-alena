@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import List, Optional, Sequence
 
 from .artifacts import ensure_layout, intelligence_dir
+from .clock import label as timezone_label, local, local_time
 from .action.implement import implement
 from .context_package import build_context_package
 from .decide import (
@@ -119,7 +120,7 @@ def cmd_show(args: argparse.Namespace) -> int:
         return 0
 
     print(f"{repository.name} ({repository.id})")
-    print(f"  scanned    {scan['scanned_at']}")
+    print(f"  scanned    {local(scan['scanned_at'])}  ({timezone_label()})")
     print(f"  branch     {scan['branch']} @ {(scan['head_sha'] or '')[:12]}")
     print(f"  files      {scan['file_count']}")
     print(f"  languages  {', '.join(scan['languages']) or 'unknown'}")
@@ -140,7 +141,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
     for row in rows:
         detail = row["denial_reason"] or row["error"] or ""
         print(
-            f"{row['created_at']}  {row['outcome']:<8} {row['tool']:<24} "
+            f"{local(row['created_at'])}  {row['outcome']:<8} {row['tool']:<24} "
             f"{row['agent']:<18} {detail}".rstrip()
         )
     return 0
@@ -338,12 +339,12 @@ def cmd_show_decision(args: argparse.Namespace) -> int:
     for row in history(args.id):
         reason = f" — {row['reason']}" if row["reason"] else ""
         print(
-            f"{row['created_at']}  {row['from_status']} -> {row['to_status']}"
+            f"{local(row['created_at'])}  {row['from_status']} -> {row['to_status']}"
             f"  ({row['actor']}){reason}"
         )
     for row in implementations_for(args.id):
         print(
-            f"{row['created_at']}  implementation {row['status']}"
+            f"{local(row['created_at'])}  implementation {row['status']}"
             f"  branch={row['branch']}  tests="
             f"{'passed' if row['tests_passed'] else 'failed/none'}"
             f"  review={row['review_verdict']}"
@@ -668,7 +669,7 @@ def cmd_history(args: argparse.Namespace) -> int:
     for event in events:
         marker = "!" if event.adverse else " "
         print(
-            f"{marker} {event.at[:16].replace('T', ' ')}  {event.kind:<14} "
+            f"{marker} {local(event.at)}  {event.kind:<14} "
             f"{event.repository_id:<{width}}  {event.summary}"
         )
         if args.detail and event.detail:
@@ -678,6 +679,7 @@ def cmd_history(args: argparse.Namespace) -> int:
         totals = counts()
         print()
         print("  " + " · ".join(f"{k} {v}" for k, v in totals.items() if v))
+    print(f"  times in {timezone_label()}")
     return 0
 
 

@@ -12,7 +12,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from ..artifacts import intelligence_dir, utcnow
+from ..artifacts import intelligence_dir
+from ..clock import label as timezone_label, now
 
 
 def render_recommendation(row: Dict[str, Any], repository_id: str) -> str:
@@ -60,7 +61,7 @@ def render_report(
     lines = [
         f"# {repository_name} — recommendations",
         "",
-        f"_Generated {utcnow()}. {len(rows)} open recommendation(s)._",
+        f"_Generated {now()} ({timezone_label()}). {len(rows)} open recommendation(s)._",
         "",
     ]
 
@@ -136,7 +137,7 @@ def render_portfolio(snapshot: Dict[str, Any]) -> str:
     lines = [
         "# Portfolio",
         "",
-        f"_Generated {utcnow()} across {len(repositories)} repositories._",
+        f"_Generated {now()} ({timezone_label()}) across {len(repositories)} repositories._",
         "",
         "| Repository | Technologies |",
         "|---|---|",

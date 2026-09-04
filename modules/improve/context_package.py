@@ -19,7 +19,8 @@ from typing import Any, Dict, List, Optional
 
 import yaml
 
-from .artifacts import repository_dir, utcnow
+from .artifacts import repository_dir
+from .clock import now
 from .registry import Repository
 
 CONTEXT_DIRNAME = ".context"
@@ -61,7 +62,7 @@ def write_context_package(
         yaml.safe_dump(
             {
                 **repository.to_dict(),
-                "generated_at": utcnow(),
+                "generated_at": now(),
                 "branch": scan.get("branch"),
                 "head_sha": scan.get("head_sha"),
                 "file_count": scan.get("file_count"),

@@ -1,5 +1,11 @@
 <script setup lang="ts">
 const { get, post } = useAlena()
+const clock = useClock()
+// Not awaited. A top-level await here would put every watcher registered
+// below it outside the component's setup scope, and `useAsyncData(..., {
+// watch })` silently stops refetching -- which is how the filters break. The
+// zone is a module-level ref, so formatting re-renders once it arrives.
+clock.load()
 
 type Command = {
   key: string
@@ -157,7 +163,7 @@ const focusable = computed(() => commands.value.filter((c) => c.accepts_focus))
         <li v-for="run in runs.slice(0, 6)" :key="run.id" class="flex gap-3 text-neutral-500">
           <button class="underline" @click="active = run; refresh()">{{ run.label }}</button>
           <span :class="run.state === 'failed' ? 'text-red-700 dark:text-red-400' : ''">{{ run.state }}</span>
-          <span>{{ run.started_at.slice(11, 16) }}</span>
+          <span>{{ clock.time(run.started_at) }}</span>
         </li>
       </ul>
       <p class="mt-2 text-xs text-neutral-500">

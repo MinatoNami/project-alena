@@ -529,6 +529,20 @@ Nightly, via launchd:
 <dict><key>Hour</key><integer>2</integer><key>Minute</key><integer>0</integer></dict>
 ```
 
+## Times
+
+Records are written in UTC with an explicit offset, and that does not change:
+it is what makes the history sortable as plain strings and keeps the database
+meaningful read from anywhere. What changed is the reading.
+
+`ALENA_TIMEZONE` (default `Asia/Singapore`) is applied at the edge — the CLI,
+the generated markdown, and the dashboard, which is served the same value so
+a browser in another country still agrees with the terminal.
+
+This is not cosmetic. The nightly scan runs at 02:01 in Singapore and is
+stored as `18:01` the previous day; reading the stored number is how you
+conclude the job never ran.
+
 ## What has actually happened
 
 ```bash

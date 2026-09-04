@@ -1,5 +1,11 @@
 <script setup lang="ts">
 const { get } = useAlena()
+const clock = useClock()
+// Not awaited. A top-level await here would put every watcher registered
+// below it outside the component's setup scope, and `useAsyncData(..., {
+// watch })` silently stops refetching -- which is how the filters break. The
+// zone is a module-level ref, so formatting re-renders once it arrives.
+clock.load()
 
 type Event = {
   kind: string
@@ -31,17 +37,31 @@ const { data, refresh } = await useAsyncData(
   { watch: [repository, kinds] },
 )
 
+const filtered = computed(() => Boolean(repository.value) || kinds.value.length > 0)
+const repositoryName = computed(
+  () =>
+    repositories.value?.find((r) => r.id === repository.value)?.name
+    ?? 'any repository',
+)
+
+function clearFilters() {
+  repository.value = ''
+  kinds.value = []
+}
+
 function toggle(kind: string) {
   kinds.value = kinds.value.includes(kind)
     ? kinds.value.filter((k) => k !== kind)
     : [...kinds.value, kind]
 }
 
-/** Group by day, because "what happened on the 3rd" is how anyone reads this. */
+/** Group by day, because "what happened on the 3rd" is how anyone reads this.
+ *  Grouped on the *local* day: a run at 02:01 in Singapore is stored as the
+ *  previous day in UTC, and filing it under yesterday would be wrong. */
 const days = computed(() => {
   const grouped = new Map<string, Event[]>()
   for (const event of data.value?.events ?? []) {
-    const day = event.at.slice(0, 10)
+    const day = clock.dayKey(event.at)
     grouped.set(day, [...(grouped.get(day) ?? []), event])
   }
   return [...grouped.entries()]
@@ -89,7 +109,15 @@ const kindClass = (kind: string) =>
       </div>
     </div>
 
-    <p v-if="!days.length" class="text-sm text-neutral-500">Nothing has happened yet.</p>
+    <!-- Two different empty states. Saying "nothing has happened yet" when a
+         filter simply matched nothing reads as the system being broken. -->
+    <div v-if="!days.length && filtered" class="text-sm text-neutral-500">
+      <p>No {{ kinds.length ? kinds.join(' or ') : 'events' }} for
+        <span class="font-medium">{{ repositoryName }}</span>.</p>
+      <button class="mt-2 text-xs underline" @click="clearFilters">Clear the filters</button>
+    </div>
+    <p v-else-if="!days.length" class="text-sm text-neutral-500">Nothing has happened yet.</p>
+    <p v-else class="mb-4 text-xs text-neutral-500">Times in {{ clock.zoneLabel }}.</p>
 
     <section v-for="[day, events] in days" :key="day" class="mb-8">
       <h2 class="mb-2 text-xs font-semibold uppercase tracking-wide text-neutral-500">{{ day }}</h2>
@@ -97,7 +125,7 @@ const kindClass = (kind: string) =>
         <li v-for="(event, index) in events" :key="`${day}-${index}`" class="px-4 py-3">
           <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
             <span class="w-11 shrink-0 font-mono text-xs text-neutral-500">
-              {{ event.at.slice(11, 16) }}
+              {{ clock.time(event.at) }}
             </span>
             <span class="rounded px-2 py-0.5 text-xs" :class="kindClass(event.kind)">
               {{ event.kind }}

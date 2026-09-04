@@ -193,6 +193,18 @@ def create_app() -> FastAPI:
     async def health() -> Dict[str, Any]:
         return {"ok": True}
 
+    @app.get("/api/config")
+    async def get_config() -> Dict[str, Any]:
+        """Settings the dashboard needs to render correctly.
+
+        The timezone is served rather than left to the browser so the page and
+        the CLI agree on what time something happened, even when the browser
+        is somewhere else.
+        """
+        from modules.improve.clock import label, timezone_name
+
+        return {"timezone": timezone_name(), "timezone_label": label()}
+
     @app.get("/api/status")
     async def get_status() -> Dict[str, Any]:
         state = summary(registry())

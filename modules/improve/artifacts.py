@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from .clock import local
+
 DEFAULT_INTELLIGENCE_DIR = "~/.alena/intelligence"
 
 SUBDIRECTORIES = (
@@ -75,7 +77,7 @@ def render_profile(scan: Dict[str, Any]) -> str:
         "",
         "| | |",
         "|---|---|",
-        f"| Scanned | {scan.get('scanned_at', '')} |",
+        f"| Scanned | {local(scan.get('scanned_at'))} |",
         f"| Branch | `{scan.get('branch') or 'unknown'}` |",
         f"| HEAD | `{(scan.get('head_sha') or 'none')[:12]}` |",
         f"| Working tree | {'dirty' if scan.get('dirty') else 'clean'} |",
