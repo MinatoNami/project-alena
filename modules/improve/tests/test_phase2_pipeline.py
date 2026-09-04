@@ -156,6 +156,77 @@ Remove every file.
     assert len(second.duplicates) == 1
 
 
+def test_an_observation_is_not_shown_its_own_recommendation_as_prior_art():
+    """The trap in widening the prior list: rejecting an idea as itself.
+
+    A scored observation has a recommendation of its own in the table, and
+    handing that back to the reviewer would have it answer "restatement".
+    """
+    from modules.improve.review_run import priors_besides
+
+    priors = [
+        {"id": 1, "observation_id": 7, "title": "Its own"},
+        {"id": 2, "observation_id": 9, "title": "Someone else's"},
+    ]
+
+    kept = priors_besides(priors, 7)
+
+    assert [p["title"] for p in kept] == ["Someone else's"]
+
+
+def test_priors_with_no_observation_behind_them_are_kept():
+    """An operator's own proposal has no observation; it is still prior art."""
+    from modules.improve.review_run import priors_besides
+
+    priors = [{"id": 1, "title": "Operator idea"}]
+
+    assert priors_besides(priors, 7) == priors
+
+
+@pytest.mark.asyncio
+async def test_the_reviewer_is_shown_ideas_that_are_still_open(repository):
+    """Not only rejections. An accepted idea is as much a duplicate.
+
+    Showing only rejections is how a reworded "Nuxt 3 is in maintenance" got
+    past a reviewer that had already approved "Nuxt 4 is the supported line".
+    """
+    from modules.improve.decide import ACCEPTED, decide
+
+    ingest_text(repository, RESEARCH, use_embeddings=False)
+    await review_repository_async(
+        repository,
+        executor=reviewer({"Local OCR": SUPPORTED, "Ignore all": REJECTED}),
+    )
+    recommend_repository(repository)
+    open_one = [
+        r for r in recommendations_for(repository.id) if r["status"] == "recommended"
+    ][0]
+    decide(repository.id, open_one["id"], ACCEPTED)
+
+    second = """# Research: sample
+
+Repository: sample
+Source: chatgpt-work
+
+## Running text recognition on the machine itself
+
+Something quite differently worded.
+"""
+    ingest_text(repository, second, use_embeddings=False)
+
+    prompts = []
+
+    async def capture(server, tool, arguments, **kwargs):
+        prompts.append(arguments["question"])
+        return codex_result(SUPPORTED)
+
+    await review_repository_async(repository, executor=capture)
+
+    assert prompts, "the new observation was never reviewed"
+    assert open_one["title"] in prompts[0]
+    assert "already accepted and awaiting implementation" in prompts[0]
+
+
 @pytest.mark.asyncio
 async def test_an_unreviewed_observation_produces_no_recommendation(repository):
     ingest_text(repository, RESEARCH, use_embeddings=False)

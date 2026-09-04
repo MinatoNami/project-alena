@@ -32,16 +32,19 @@ ABANDONED = "abandoned"
 SUCCESSFUL = "successful"
 UNSUCCESSFUL = "unsuccessful"
 
-# Terminal except for `rejected`, which can be revisited -- the spec's report
-# offers Accept, Reject and Revisit, and a rejection made when the product was
-# less mature is exactly the kind that gets reconsidered.
+# Terminal except for the two that can be revisited. A rejection made when
+# the product was less mature is exactly the kind that gets reconsidered --
+# the spec's report offers Accept, Reject and Revisit. And a failed attempt
+# is a fact about the attempt, not about the idea: "that did not work" has to
+# be able to lead to "try it again", or the first bad implementation buries a
+# good recommendation for good.
 TRANSITIONS: Dict[str, Set[str]] = {
     RECOMMENDED: {ACCEPTED, REJECTED},
     ACCEPTED: {IMPLEMENTED, ABANDONED, REJECTED},
     REJECTED: {RECOMMENDED},
     IMPLEMENTED: {SUCCESSFUL, UNSUCCESSFUL, ABANDONED},
     SUCCESSFUL: set(),
-    UNSUCCESSFUL: set(),
+    UNSUCCESSFUL: {ACCEPTED, ABANDONED},
     ABANDONED: set(),
 }
 

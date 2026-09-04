@@ -33,23 +33,10 @@ from typing import Iterable, List, Optional, Sequence
 
 from modules.core.controller.logger import logger
 
-from ..text import jaccard, normalize_title
+from ..text import jaccard, normalize_title, where_it_stands
 
 # Tuned to be cautious: a false "duplicate" silently loses a real idea, which
 # is worse than a duplicate reaching a human who can see it is one.
-# How each status reads when something duplicates it. Phrased as what is
-# outstanding, because that is what the reader has to act on.
-_WHERE = {
-    "awaiting review": "already proposed and awaiting review",
-    "recommended": "already proposed and awaiting your decision",
-    "accepted": "already accepted and awaiting implementation",
-    "implemented": "already implemented",
-    "rejected": "already rejected",
-    "abandoned": "already proposed and then abandoned",
-    "successful": "already implemented, and it worked",
-    "unsuccessful": "already implemented, and it did not work",
-}
-
 TITLE_MATCH = 1.0
 # Titles are short and on-topic, so their overlap is a sharper signal than the
 # same measure over full text, where a long shared preamble drowns it. Hence a
@@ -120,7 +107,7 @@ class DedupVerdict:
         if not self.duplicate or self.matched is None:
             return None
 
-        where = _WHERE.get(self.matched.status, f"already recorded as {self.matched.status}")
+        where = where_it_stands(self.matched.status)
         detail = (
             f"{self.matched.kind} #{self.matched.id}, matched on "
             f"{self.method} ({self.similarity:.2f})"

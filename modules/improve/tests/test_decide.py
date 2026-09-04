@@ -63,6 +63,8 @@ def recommendation(repository):
         (IMPLEMENTED, SUCCESSFUL),
         (IMPLEMENTED, UNSUCCESSFUL),
         (REJECTED, RECOMMENDED),
+        (UNSUCCESSFUL, ACCEPTED),
+        (UNSUCCESSFUL, ABANDONED),
     ],
 )
 def test_allowed_transitions(source, target):
@@ -78,6 +80,7 @@ def test_allowed_transitions(source, target):
         (SUCCESSFUL, ACCEPTED),
         (ABANDONED, ACCEPTED),
         (UNSUCCESSFUL, IMPLEMENTED),
+        (UNSUCCESSFUL, SUCCESSFUL),
     ],
 )
 def test_refused_transitions(source, target):
@@ -193,3 +196,27 @@ def test_a_rejection_can_be_revisited(repository, recommendation):
     decide(repository.id, recommendation, RECOMMENDED)
 
     assert get_recommendation(repository.id, recommendation)["status"] == RECOMMENDED
+
+
+def test_a_failed_attempt_can_be_attempted_again(repository, recommendation):
+    """A bad implementation is a fact about the attempt, not the idea.
+
+    Without this the first failed run buries a good recommendation for good:
+    `unsuccessful` used to be terminal, which only went unnoticed while
+    nothing ever moved a recommendation out of `accepted`.
+    """
+    decide(repository.id, recommendation, ACCEPTED)
+    decide(repository.id, recommendation, IMPLEMENTED, actor="codex")
+    decide(repository.id, recommendation, UNSUCCESSFUL, reason="tests failed")
+    decide(repository.id, recommendation, ACCEPTED)
+
+    assert get_recommendation(repository.id, recommendation)["status"] == ACCEPTED
+
+
+def test_a_success_is_still_the_end_of_the_line(repository, recommendation):
+    decide(repository.id, recommendation, ACCEPTED)
+    decide(repository.id, recommendation, IMPLEMENTED, actor="codex")
+    decide(repository.id, recommendation, SUCCESSFUL)
+
+    with pytest.raises(DecisionError, match="Cannot go from"):
+        decide(repository.id, recommendation, ACCEPTED)

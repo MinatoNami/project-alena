@@ -186,6 +186,67 @@ def test_an_illegal_transition_says_what_is_possible(client, queued):
     assert "Cannot go from" in response.json()["detail"]
 
 
+def test_a_built_recommendation_is_listed_for_its_outcome(client, queued):
+    """What the dashboard's "Built, awaiting an outcome" section reads.
+
+    Without this filter working, a recommendation would leave the accepted
+    list the moment its branch existed and appear nowhere at all.
+    """
+    from modules.improve.decide import IMPLEMENTED, decide
+
+    decide("sample", queued, ACCEPTED)
+    decide("sample", queued, IMPLEMENTED, actor="codex")
+
+    rows = client.get(
+        "/api/repositories/sample/recommendations?status=implemented"
+    ).json()
+
+    assert [r["id"] for r in rows] == [queued]
+    assert client.get(
+        "/api/repositories/sample/recommendations?status=accepted"
+    ).json() == []
+
+
+def test_recording_a_failure_puts_it_back_in_the_queue(client, queued):
+    """The retry path the outcome form offers, end to end."""
+    from modules.improve.decide import IMPLEMENTED, decide
+
+    decide("sample", queued, ACCEPTED)
+    decide("sample", queued, IMPLEMENTED, actor="codex")
+
+    failed = client.post(
+        f"/api/recommendations/{queued}/decision",
+        json={"decision": "unsuccessful", "reason": "the vitest suite fails"},
+        headers=DASHBOARD,
+    )
+    assert failed.status_code == 200
+
+    again = client.post(
+        f"/api/recommendations/{queued}/decision",
+        json={"decision": "accept"},
+        headers=DASHBOARD,
+    )
+
+    assert again.status_code == 200
+    assert recommendations_for("sample")[0]["status"] == ACCEPTED
+
+
+def test_a_failure_still_needs_a_reason(client, queued):
+    from modules.improve.decide import IMPLEMENTED, decide
+
+    decide("sample", queued, ACCEPTED)
+    decide("sample", queued, IMPLEMENTED, actor="codex")
+
+    response = client.post(
+        f"/api/recommendations/{queued}/decision",
+        json={"decision": "unsuccessful"},
+        headers=DASHBOARD,
+    )
+
+    assert response.status_code == 422
+    assert "requires a reason" in response.json()["detail"]
+
+
 def test_an_unknown_decision_is_rejected(client, queued):
     response = client.post(
         f"/api/recommendations/{queued}/decision",

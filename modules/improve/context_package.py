@@ -4,11 +4,12 @@ Written once per repository and reused by every agent that looks at it, so
 Codex, Claude and the local model all reason from the same picture and none of
 them has to re-derive it by scanning the repository again.
 
-The rejected-recommendations file is the one that earns its place. Dedup
-catches a reworded proposal only when an embedding model is loaded; when it is
-not, a rewording reaches review anyway. Handing the reviewer the list of things
-already turned down, with the reason each was turned down, is what catches it
-then -- so this file is not documentation, it is the second half of dedup.
+The recommendation files are the ones that earn their place. Dedup catches a
+reworded proposal only when an embedding model is loaded; when it is not, a
+rewording reaches review anyway. Handing the reviewer the list of what has
+already been proposed -- turned down, or accepted and still waiting to be
+built, both of which make a new proposal a restatement -- is what catches it
+then, so these files are not documentation, they are the second half of dedup.
 """
 
 from __future__ import annotations
@@ -112,7 +113,9 @@ def write_context_package(
     ):
         rows = recommendations.get(key) or []
         heading = f"# {repository.name} — {key} recommendations\n\n"
-        if key == "rejected":
+        if key in ("rejected", "all"):
+            # Not only the rejections: an idea already accepted and waiting to
+            # be built is as much a restatement as one that was turned down.
             heading += (
                 "Do not propose these again. If a new observation is a "
                 "restatement of one of them, say so rather than proposing it.\n\n"

@@ -319,10 +319,14 @@ proposal that was already turned down is the expensive half of the mistake:
 LM Studio serves embeddings only when an embedding model occupies its
 embedding slot, which is separate from the chat slot. With that slot empty —
 the usual state of an install set up for chat — layers 1 and 2 still run, and
-a genuine paraphrase can reach review. What catches it then is the
-rejected-recommendations file in the context package, which goes into the
-reviewer prompt with the reason each idea was turned down. Set
-`LLM_EMBEDDING_MODEL` and load one to close the gap properly.
+a genuine paraphrase can reach review. What catches it then is the list of
+what has already been proposed, which goes into the reviewer prompt with where
+each idea stands and why. That list covers open and accepted recommendations
+as well as rejected ones -- an idea already waiting to be built is as much a
+duplicate as one that was turned down, and showing only the rejections let a
+reworded "Nuxt 3 is in maintenance" past a reviewer that had already approved
+"Nuxt 4 is the supported line". Set `LLM_EMBEDDING_MODEL` and load one to
+close the gap properly.
 
 ### Scoring
 
@@ -341,8 +345,9 @@ Nothing becomes code without a recorded human decision.
 
 ```
 recommend ──► recommended ──┬──► accepted ──┬──► implemented ──┬──► successful
-                            │               │                  ├──► unsuccessful
-                            │               └──► abandoned      └──► abandoned
+                            │           ▲   │                  ├──► unsuccessful
+                            │           │   └──► abandoned     └──► abandoned
+                            │           └──────── (retry) ─────────────┘
                             └──► rejected ──► (revisit) ──► recommended
 ```
 
@@ -350,6 +355,20 @@ The transitions are a closed set, not an UPDATE anyone can make, and decisions
 are appended rather than overwritten — "accepted, then abandoned three weeks
 later" is a different fact from "abandoned", and only one of them survives an
 overwrite.
+
+Two of them can be walked back. A rejection made when the product was less
+mature is exactly the kind that gets reconsidered, so `rejected` can be
+revisited. And a failed attempt is a fact about the attempt, not about the
+idea, so `unsuccessful` can go back to `accepted` to be attempted again —
+without that, the first bad implementation buries a good recommendation for
+good.
+
+The move to `implemented` is the one decision an agent makes rather than a
+human, and it records only that the branch exists. Whether the change was any
+good is `successful` / `unsuccessful`, and that stays the human's call — a run
+whose tests failed still lands on `implemented`, because "it was built" and
+"it worked" are different claims. A run that fails outright leaves the
+recommendation `accepted`, so it can simply be attempted again.
 
 A rejection or an abandonment **requires** a reason. That is not paperwork: the
 reason goes into the context package, the next reviewer's prompt, and

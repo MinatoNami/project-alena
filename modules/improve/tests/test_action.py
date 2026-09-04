@@ -194,6 +194,83 @@ def test_the_commit_references_the_recommendation(repo, writable, accepted):
     assert "reviewed by claude" in message
 
 
+def test_a_built_recommendation_stops_waiting_to_be_built(repo, writable, accepted):
+    """The branch exists, so `accepted` is no longer the truth.
+
+    Left unmoved, the status view reported an implemented recommendation as
+    still awaiting implementation and its `implemented` stage was permanently
+    empty.
+    """
+    from modules.improve.decide import IMPLEMENTED, get_recommendation
+
+    run(writable, accepted)
+
+    assert get_recommendation(writable.id, accepted)["status"] == IMPLEMENTED
+
+
+def test_the_agent_that_built_it_is_recorded_as_having_moved_it(
+    repo, writable, accepted
+):
+    from modules.improve.decide import history
+
+    outcome = run(writable, accepted)
+
+    moves = [h for h in history(accepted) if h["to_status"] == "implemented"]
+    assert len(moves) == 1
+    assert moves[0]["actor"] == outcome.pairing.implementer
+    assert moves[0]["actor"] != "human"
+
+
+def test_failing_tests_do_not_decide_the_outcome(
+    repo, writable, accepted, monkeypatch
+):
+    """Built is not the same as worked, and only a human records the latter.
+
+    A branch whose tests fail still reaches `implemented` -- the agent says
+    what it did, the human says whether it was any good. The suite is faked
+    rather than really run: what is under test is what happens downstream of
+    a failure, and a real run would only prove `pytest` is on PATH.
+    """
+    from modules.improve.action import implement as module
+    from modules.improve.decide import IMPLEMENTED, get_recommendation
+
+    monkeypatch.setattr(
+        module,
+        "_run_suites",
+        lambda *a, **k: TestResult("pytest -q", False, "1 failed"),
+    )
+    outcome = run(writable, accepted, run_tests_enabled=True)
+
+    assert outcome.ok
+    assert outcome.tests.passed is False
+    row = get_recommendation(writable.id, accepted)
+    assert row["status"] == IMPLEMENTED
+    assert row["observed_value"] is None
+
+
+def test_a_failed_run_leaves_it_accepted_so_it_can_be_retried(
+    repo, writable, accepted
+):
+    from modules.improve.decide import ACCEPTED as STILL, get_recommendation
+
+    (repo / "scratch.txt").write_text("notes\n")
+    outcome = run(writable, accepted)
+
+    assert not outcome.ok
+    assert get_recommendation(writable.id, accepted)["status"] == STILL
+
+
+def test_building_it_twice_is_refused_with_what_to_do_instead(
+    repo, writable, accepted
+):
+    run(writable, accepted)
+    second = run(writable, accepted)
+
+    assert not second.ok
+    assert "already been built" in second.error
+    assert "--successful" in second.error
+
+
 def test_nothing_is_pushed(repo, writable, accepted):
     """Pushing is a separate act with its own approval; it is not implemented."""
     outcome = run(writable, accepted)

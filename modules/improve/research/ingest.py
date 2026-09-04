@@ -146,7 +146,8 @@ def ingest_text(
         logger.warning(
             f"{repository.id}: no embedding model loaded, so de-duplication ran "
             "on titles and token overlap only. A reworded duplicate can reach "
-            "review; the rejected-recommendations context is what catches it."
+            "review; the list of what has already been proposed, which the "
+            "reviewer is shown, is the only thing left to catch it."
         )
     return result
 

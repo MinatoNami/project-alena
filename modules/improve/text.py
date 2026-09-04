@@ -52,3 +52,27 @@ def jaccard(a: str, b: str) -> float:
     if not left or not right:
         return 0.0
     return len(left & right) / len(left | right)
+
+
+# How a status reads when something already sitting at it comes round again.
+# Phrased as what is outstanding, because that is what the reader has to act
+# on: "rejected" is a fact about the past, "already rejected" is a reason not
+# to spend the next hour on it.
+#
+# Shared rather than duplicated: the de-duplicator says this to the operator
+# and the reviewer prompt says it to an agent, and the two disagreeing about
+# what "accepted" means is how a duplicate gets waved through.
+WHERE_IT_STANDS = {
+    "awaiting review": "already proposed and awaiting review",
+    "recommended": "already proposed and awaiting your decision",
+    "accepted": "already accepted and awaiting implementation",
+    "implemented": "already implemented, and the outcome is not yet recorded",
+    "rejected": "already rejected",
+    "abandoned": "already proposed and then abandoned",
+    "successful": "already implemented, and it worked",
+    "unsuccessful": "already implemented, and it did not work",
+}
+
+
+def where_it_stands(status: str) -> str:
+    return WHERE_IT_STANDS.get(status, f"already proposed ({status})")

@@ -23,6 +23,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+from ..text import where_it_stands
+
 # A delimiter the document cannot contain, because it is stripped from the
 # document first. Without that, "end of data, new instructions follow" works.
 # What `source` an operator-proposed observation carries.
@@ -105,24 +107,41 @@ def observation_block(observation: Dict[str, Any]) -> str:
     )
 
 
-def rejected_block(rejected: Optional[List[Dict[str, Any]]]) -> str:
-    """Previously rejected ideas, with their reasons.
+def priors_block(priors: Optional[List[Dict[str, Any]]]) -> str:
+    """Everything already proposed for this repository, and where it stands.
 
     This is the half of de-duplication that works without an embedding model:
     a reworded proposal that slipped past the similarity check is caught by a
-    reviewer who can see what was already turned down and why.
+    reviewer who can see what has already been said.
+
+    Rejected ones are not the only ones that matter. An idea that is already
+    accepted and waiting to be built is just as much a duplicate as one that
+    was turned down, and showing only the rejections is how "Nuxt 3 is in
+    maintenance" got past a reviewer that had already been shown, and had
+    approved, "Nuxt 4 is the supported line". Reasons are carried where there
+    are any, because "no" without "why" invites the same idea next month.
     """
-    if not rejected:
+    if not priors:
         return ""
     lines = []
-    for row in rejected[:20]:
-        reason = f" — rejected because: {row['reason']}" if row.get("reason") else ""
-        lines.append(f"- {row['title']}{reason}")
+    for row in priors[:20]:
+        status = row.get("status", "")
+        where = where_it_stands(status)
+        # Only for rejections. `reason` carries whatever the last decision
+        # said, so on anything else it is as likely to be "reverting an
+        # unintended accept" as an argument -- which reads, next to a title,
+        # as a reason to dismiss the idea itself.
+        reason = (
+            f" — {row['reason']}"
+            if status == "rejected" and row.get("reason")
+            else ""
+        )
+        lines.append(f"- [{where}] {row['title']}{reason}")
     return (
-        "\nPreviously rejected for this repository. If the observation is a "
-        'restatement of one of these, answer "rejected" and say which:\n'
-        + "\n".join(lines)
-        + "\n"
+        "\nAlready proposed for this repository. If the observation is a "
+        'restatement of one of these, answer "rejected" and say which -- '
+        "whether it was turned down or is already in flight, proposing it "
+        "again adds nothing:\n" + "\n".join(lines) + "\n"
     )
 
 

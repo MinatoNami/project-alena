@@ -22,6 +22,21 @@ const { data: acceptedRows, refresh: refreshAccepted } = await useAsyncData('acc
   return out
 })
 
+// Built, and waiting for someone to say whether it worked. Without this
+// section a recommendation would vanish from the dashboard the moment its
+// branch existed -- and recording the outcome is the whole point of the
+// loop, since it is what the scoring learns from.
+const { data: builtRows, refresh: refreshBuilt } = await useAsyncData('built', async () => {
+  const out: Recommendation[] = []
+  for (const repo of repositories.value ?? []) {
+    const rows = await get<Recommendation[]>(
+      `/api/repositories/${repo.id}/recommendations?status=implemented`,
+    )
+    for (const row of rows) out.push({ ...row, repository_name: repo.name })
+  }
+  return out
+})
+
 const confirming = ref<number | null>(null)
 const implementing = ref<Run | null>(null)
 const implementFailure = ref<string | null>(null)
@@ -43,6 +58,7 @@ async function implement(row: Recommendation) {
         clearInterval(implementTimer!)
         implementTimer = null
         await refreshAccepted()
+        await refreshBuilt()
       }
     }, 2000)
   } catch (e: any) {
@@ -58,6 +74,10 @@ const reason = ref('')
 const busy = ref<number | null>(null)
 const failure = ref<string | null>(null)
 const accepted = ref<{ id: number; next: string } | null>(null)
+// Which built recommendation is having its failure written up. Marking
+// something unsuccessful requires a reason, the same as a rejection.
+const failing = ref<number | null>(null)
+const failureReason = ref('')
 
 async function send(id: number, decision: string, why?: string) {
   busy.value = id
@@ -71,6 +91,8 @@ async function send(id: number, decision: string, why?: string) {
     rejecting.value = null
     reason.value = ''
     await refresh()
+    await refreshAccepted()
+    await refreshBuilt()
   } catch (e: any) {
     // The state machine's refusals are the useful ones -- a rejection with no
     // reason, an illegal transition. Show what it said rather than "failed".
@@ -196,7 +218,67 @@ const priorityClass = (p?: string) =>
       </div>
     </section>
 
-    <div v-if="!data?.length && !acceptedRows?.length" class="text-sm text-neutral-500">
+    <section v-if="builtRows?.length" class="mb-10">
+      <h2 class="text-xs font-semibold uppercase tracking-wide text-neutral-500">
+        Built, awaiting an outcome
+      </h2>
+      <p class="mt-1 text-xs text-neutral-500">
+        A branch exists. Whether it was any good is not something the agent decides — read the
+        diff, then say. This is what the scoring learns from.
+      </p>
+
+      <ul class="mt-3 space-y-3">
+        <li
+          v-for="row in builtRows"
+          :key="row.id"
+          class="rounded border border-neutral-200 px-4 py-3 dark:border-neutral-800"
+        >
+          <div class="flex flex-wrap items-baseline justify-between gap-2">
+            <span class="text-sm">{{ row.title }}</span>
+            <span class="text-xs text-neutral-500">{{ row.repository_name }}</span>
+          </div>
+
+          <div v-if="failing !== row.id" class="mt-3 flex flex-wrap items-center gap-3">
+            <button
+              class="rounded border border-neutral-300 px-3 py-1.5 text-sm disabled:opacity-40 dark:border-neutral-700"
+              :disabled="busy === row.id"
+              @click="send(row.id, 'successful')"
+            >It worked</button>
+            <button
+              class="rounded border border-neutral-300 px-3 py-1.5 text-sm disabled:opacity-40 dark:border-neutral-700"
+              :disabled="busy === row.id"
+              @click="failing = row.id"
+            >It did not…</button>
+          </div>
+
+          <div v-else class="mt-3">
+            <label class="block text-xs text-neutral-500" :for="`why-${row.id}`">
+              What went wrong? It goes to the next reviewer, and the idea returns to the queue so
+              it can be attempted again.
+            </label>
+            <input
+              :id="`why-${row.id}`"
+              v-model="failureReason"
+              class="mt-1 w-full rounded border border-neutral-300 bg-transparent px-2 py-1.5 text-sm dark:border-neutral-700"
+              placeholder="the vitest suite fails on the new config"
+            >
+            <div class="mt-2 flex flex-wrap items-center gap-3">
+              <button
+                class="rounded bg-neutral-900 px-3 py-1.5 text-sm text-white disabled:opacity-40 dark:bg-neutral-100 dark:text-neutral-900"
+                :disabled="!failureReason.trim() || busy === row.id"
+                @click="send(row.id, 'unsuccessful', failureReason); failing = null; failureReason = ''"
+              >Record it</button>
+              <button
+                class="text-xs text-neutral-500 underline"
+                @click="failing = null; failureReason = ''"
+              >Cancel</button>
+            </div>
+          </div>
+        </li>
+      </ul>
+    </section>
+
+    <div v-if="!data?.length && !acceptedRows?.length && !builtRows?.length" class="text-sm text-neutral-500">
       Nothing is awaiting a decision.
     </div>
 

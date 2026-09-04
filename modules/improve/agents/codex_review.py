@@ -39,7 +39,7 @@ from .prompting import (
     observation_block,
     operator_note,
     preamble_for,
-    rejected_block,
+    priors_block,
 )
 
 AGENT = "codex"
@@ -74,7 +74,7 @@ def build_prompt(
     repository_name: str,
     observation: Dict[str, Any],
     context: Optional[str] = None,
-    rejected: Optional[List[Dict[str, Any]]] = None,
+    priors: Optional[List[Dict[str, Any]]] = None,
     note: Optional[str] = None,
 ) -> str:
     return f"""You are reviewing a proposal against the repository you are
@@ -83,7 +83,7 @@ running inside. Decide whether it makes engineering sense *here*.
 {preamble_for(observation.get("source"))}
 
 Do not modify anything. This is a read-only review.
-{operator_note(note)}{rejected_block(rejected)}
+{operator_note(note)}{priors_block(priors)}
 Repository: {repository_name}
 {f"Context:{chr(10)}{context}{chr(10)}" if context else ""}
 {observation_block(observation)}
@@ -122,7 +122,7 @@ async def review_observation(
     observation: Dict[str, Any],
     *,
     context: Optional[str] = None,
-    rejected: Optional[List[Dict[str, Any]]] = None,
+    priors: Optional[List[Dict[str, Any]]] = None,
     note: Optional[str] = None,
     executor=None,
 ) -> ReviewResult:
@@ -132,7 +132,7 @@ async def review_observation(
     from modules.core.controller.tool_executor import execute_tool
 
     executor = executor or execute_tool
-    prompt = build_prompt(repository.name, observation, context, rejected, note)
+    prompt = build_prompt(repository.name, observation, context, priors, note)
 
     try:
         raw = await executor(

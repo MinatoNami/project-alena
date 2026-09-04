@@ -60,6 +60,19 @@ class ReviewRun:
         return f"{self.repository_id}: {', '.join(parts)}"
 
 
+def priors_besides(
+    priors: List[Dict[str, Any]], observation_id: int
+) -> List[Dict[str, Any]]:
+    """Prior recommendations other than this observation's own.
+
+    An observation that has already been scored has a recommendation of its
+    own in the table. Handing that back to the reviewer as prior art would
+    have it reject the idea as a restatement of itself -- so the one thing
+    that is not a duplicate is the only one filtered out.
+    """
+    return [p for p in priors if p.get("observation_id") != observation_id]
+
+
 def _context_text(repository: Repository, scan: Optional[Dict[str, Any]]) -> str:
     """A short brief for the reviewer, not the whole package.
 
@@ -103,7 +116,10 @@ async def review_repository_async(
 
     scan = latest_scan(repository.id, conn)
     context = _context_text(repository, scan)
-    rejected = recommendations_by_status(repository.id, conn)["rejected"]
+    # Everything already proposed, not just the rejections: an idea
+    # already accepted and waiting to be built is as much a duplicate as
+    # one that was turned down.
+    priors = recommendations_by_status(repository.id, conn)["all"]
     build_context_package(repository, conn=conn)
 
     for observation in observations:
@@ -111,7 +127,7 @@ async def review_repository_async(
             repository,
             observation,
             context=context,
-            rejected=rejected,
+            priors=priors_besides(priors, observation["id"]),
             note=note,
             executor=executor,
         )
@@ -181,7 +197,10 @@ def escalate_repository(
     upsert_repository(repository, conn)
     scan = latest_scan(repository.id, conn)
     context = _context_text(repository, scan)
-    rejected = recommendations_by_status(repository.id, conn)["rejected"]
+    # Everything already proposed, not just the rejections: an idea
+    # already accepted and waiting to be built is as much a duplicate as
+    # one that was turned down.
+    priors = recommendations_by_status(repository.id, conn)["all"]
     scored = {
         row["observation_id"]: row
         for row in recommendations_for(repository.id, conn=conn)
@@ -219,7 +238,7 @@ def escalate_repository(
             observation,
             codex_review=codex,
             context=context,
-            rejected=rejected,
+            priors=priors_besides(priors, observation["id"]),
             caller=caller,
         )
         record_review(

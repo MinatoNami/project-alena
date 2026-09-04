@@ -70,10 +70,57 @@ def test_rejected_recommendations_are_carried_into_the_prompt():
     prompt = build_prompt(
         "LumaIndex",
         OBSERVATION,
-        rejected=[{"title": "Semantic search", "reason": "too complex for now"}],
+        priors=[
+            {
+                "title": "Semantic search",
+                "status": "rejected",
+                "reason": "too complex for now",
+            }
+        ],
     )
     assert "Semantic search" in prompt
     assert "too complex for now" in prompt
+    assert "already rejected" in prompt
+
+
+def test_priors_that_are_still_open_reach_the_prompt_too():
+    """The gap that let a duplicate through: only rejections were shown.
+
+    An accepted recommendation waiting to be built is as much a duplicate as
+    a rejected one, and the reviewer cannot see that unless it is told.
+    """
+    prompt = build_prompt(
+        "LumaIndex",
+        OBSERVATION,
+        priors=[
+            {"title": "Nuxt 4 is the supported line", "status": "accepted"},
+            {"title": "Cache cover mosaics", "status": "recommended"},
+        ],
+    )
+    assert "Nuxt 4 is the supported line" in prompt
+    assert "already accepted and awaiting implementation" in prompt
+    assert "already proposed and awaiting your decision" in prompt
+
+
+def test_a_non_rejection_reason_is_not_shown_beside_the_title():
+    """`reason` holds the last decision's note, whatever that decision was.
+
+    Printed next to an accepted title, an operator's "reverting an unintended
+    accept" reads as an argument against the idea.
+    """
+    prompt = build_prompt(
+        "LumaIndex",
+        OBSERVATION,
+        priors=[
+            {
+                "title": "Nuxt 4 is the supported line",
+                "status": "accepted",
+                "reason": "reverting an unintended accept",
+            }
+        ],
+    )
+    assert "Nuxt 4 is the supported line" in prompt
+    assert "unintended accept" not in prompt
 
 
 def test_the_prompt_says_the_review_is_read_only():

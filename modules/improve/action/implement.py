@@ -27,7 +27,15 @@ from modules.core.controller.logger import logger
 from modules.gateway import ActionGrant, get_gateway
 from modules.gateway.errors import GatewayDenied
 
-from ..decide import ACCEPTED, get_recommendation
+from ..decide import (
+    ABANDONED,
+    ACCEPTED,
+    IMPLEMENTED,
+    SUCCESSFUL,
+    UNSUCCESSFUL,
+    decide,
+    get_recommendation,
+)
 from ..registry import Repository
 from ..scan import GitError, GitRepository
 from .routing import Pairing, pair_for
@@ -135,6 +143,27 @@ alter CI configuration, dependency pins or secrets unless the change requires
 it."""
 
 
+def _next_step(repository_id: str, recommendation_id: int, status: str) -> str:
+    """What to do about a recommendation that is not ready to be implemented.
+
+    Worth spelling out per status rather than always saying "accept it": from
+    `implemented` that is not a legal move, and telling someone to make an
+    illegal one wastes the trip.
+    """
+    command = f"alena-improve decide {repository_id} {recommendation_id}"
+    if status == IMPLEMENTED:
+        return (
+            "It has already been built. Record how it went with "
+            f'{command} --successful, or {command} --unsuccessful --reason "..." '
+            "to send it back to be attempted again."
+        )
+    if status == UNSUCCESSFUL:
+        return f"The last attempt did not work. Run: {command} --accept to retry."
+    if status in (SUCCESSFUL, ABANDONED):
+        return "It is closed, and reopening it is not a decision this records."
+    return f"Run: {command} --accept"
+
+
 async def implement_async(
     repository: Repository,
     recommendation_id: int,
@@ -162,7 +191,7 @@ async def implement_async(
     if recommendation["status"] != ACCEPTED:
         run.error = (
             f"recommendation is {recommendation['status']}, not {ACCEPTED}. "
-            f"Run: alena-improve decide {repository.id} {recommendation_id} --accept"
+            + _next_step(repository.id, recommendation_id, recommendation["status"])
         )
         return run
 
@@ -322,6 +351,21 @@ async def implement_async(
             tests_output=run.tests.output,
             review_verdict=run.review.verdict,
             review_body=run.review.body,
+            conn=conn,
+        )
+
+        # The branch exists, so the recommendation is no longer waiting to be
+        # built -- it is waiting for someone to say whether it worked. Only
+        # this path moves it: a failed run leaves nothing behind and the
+        # recommendation stays `accepted` so it can be attempted again.
+        #
+        # Whether the tests passed is deliberately not part of this. That is
+        # the outcome, and recording the outcome is the human's call.
+        decide(
+            repository.id,
+            recommendation_id,
+            IMPLEMENTED,
+            actor=run.pairing.implementer,
             conn=conn,
         )
         return run

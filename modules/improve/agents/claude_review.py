@@ -53,7 +53,7 @@ from .prompting import (
     VERDICT_SCHEMA,
     observation_block,
     preamble_for,
-    rejected_block,
+    priors_block,
 )
 
 AGENT = "claude"
@@ -135,7 +135,7 @@ def build_prompt(
     observation: Dict[str, Any],
     codex_review: Optional[Dict[str, Any]] = None,
     context: Optional[str] = None,
-    rejected: Optional[List[Dict[str, Any]]] = None,
+    priors: Optional[List[Dict[str, Any]]] = None,
 ) -> str:
     codex_block = ""
     if codex_review:
@@ -159,7 +159,7 @@ def build_prompt(
 {preamble_for(observation.get("source"))}
 
 Do not modify anything. This is a read-only review.
-{rejected_block(rejected)}{codex_block}
+{priors_block(priors)}{codex_block}
 {f"Repository context:{chr(10)}{context}{chr(10)}" if context else ""}
 {observation_block(observation)}
 
@@ -239,7 +239,7 @@ def review_observation(
     *,
     codex_review: Optional[Dict[str, Any]] = None,
     context: Optional[str] = None,
-    rejected: Optional[List[Dict[str, Any]]] = None,
+    priors: Optional[List[Dict[str, Any]]] = None,
     config: Optional[RoutineConfig] = None,
     caller=None,
 ):
@@ -248,7 +248,7 @@ def review_observation(
 
     caller = caller or call_routine
     prompt = build_prompt(
-        repository.name, observation, codex_review, context, rejected
+        repository.name, observation, codex_review, context, priors
     )
 
     try:
