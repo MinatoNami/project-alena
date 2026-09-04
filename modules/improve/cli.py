@@ -320,7 +320,10 @@ def cmd_implement(args: argparse.Namespace) -> int:
         return 2
 
     run = implement(
-        repository, args.id, run_tests_enabled=not args.no_tests
+        repository,
+        args.id,
+        run_tests_enabled=not args.no_tests,
+        recover=args.recover,
     )
     print(run.describe())
     if not run.ok:
@@ -894,6 +897,11 @@ def build_parser() -> argparse.ArgumentParser:
     impl.add_argument("repository")
     impl.add_argument("id", type=int)
     impl.add_argument("--no-tests", action="store_true", help="Skip the test run")
+    impl.add_argument(
+        "--recover",
+        action="store_true",
+        help="Discard what an interrupted previous run of this recommendation left behind",
+    )
     impl.set_defaults(func=cmd_implement)
 
     trail = sub.add_parser(

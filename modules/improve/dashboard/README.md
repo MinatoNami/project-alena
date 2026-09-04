@@ -81,6 +81,36 @@ The reviewer is told the proposal came from you and is asked for judgement
 rather than agreement — the failure mode for an operator's own idea is a
 reviewer that rubber-stamps it, so the prompt explicitly invites "no".
 
+## Watching a run
+
+Output streams into the page while the work happens. Codex emits JSONL events
+as it goes -- the commands it runs, the files it changes -- and those are
+turned into short lines and written to the MCP server's **stderr**, which the
+CLI inherits and the run panel captures. Stdout is the MCP protocol channel;
+progress there would corrupt every message on it.
+
+Everything is flushed explicitly and both subprocess layers run unbuffered.
+Python block-buffers when its output is a pipe rather than a terminal, which
+is exactly the case here, and unflushed progress arrives in one lump at the
+end -- which is the thing this is for.
+
+```
+codex: $ /bin/zsh -lc 'npm install nuxt@^4.0.0'
+codex:   exit 1
+codex: changed package.json
+codex: done — 1398677 in, 8449 out
+```
+
+Reasoning is not shown. It is the bulk of the output and it is the model
+thinking aloud rather than anything happening.
+
+**Restarting the dashboard kills a run in progress.** Runs are subprocesses
+of the API, so `launchctl kickstart` takes them with it. A killed run never
+reaches its own cleanup and leaves its branch checked out with uncommitted
+work; `alena-improve implement <repo> <id> --recover` discards that and
+starts again, and the next run recognises the situation rather than blaming
+the mess on you.
+
 ## Steering a run
 
 The run panel has a text box. What you type is appended to the analysis as

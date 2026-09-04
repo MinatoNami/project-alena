@@ -239,7 +239,12 @@ class Runner:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
-                env={**os.environ},
+                # Unbuffered, or nothing appears until the run ends. Python
+                # block-buffers stdout when it is a pipe, and a pipe is
+                # exactly what this is -- so a six-minute implementation shows
+                # a blank panel and then everything at once.
+                env={**os.environ, "PYTHONUNBUFFERED": "1"},
+                bufsize=1,
             )
         except OSError as exc:
             run.output.append(f"could not start: {exc}")

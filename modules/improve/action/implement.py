@@ -142,6 +142,7 @@ async def implement_async(
     executor=None,
     review_caller=None,
     run_tests_enabled: bool = True,
+    recover: bool = False,
     conn=None,
 ) -> ImplementationRun:
     """Implement one accepted recommendation on a fresh branch."""
@@ -173,18 +174,40 @@ async def implement_async(
         return run
 
     if state.dirty:
-        # Committing someone's work-in-progress alongside a generated change is
-        # not recoverable by reading the diff afterwards. Untracked files count:
-        # the commit below stages everything, on the strength of this check.
-        listed = ", ".join(state.dirty_files[:8])
-        if len(state.dirty_files) > 8:
-            listed += f", and {len(state.dirty_files) - 8} more"
-        run.error = (
-            f"{repository.workspace} has uncommitted changes ({listed}). Commit, "
-            "stash or ignore them first; the action agent stages everything it "
-            "finds and will not mix them into its branch."
-        )
-        return run
+        abandoned = _abandoned_run(recommendation_id, state.branch, conn)
+        if abandoned and not recover:
+            # A run that was killed -- the machine slept, the service
+            # restarted, someone pressed Ctrl-C -- never reaches its own
+            # cleanup, and leaves exactly this: its branch checked out with
+            # uncommitted work. Saying "you have uncommitted changes" about
+            # something ALENA itself wrote is unhelpful and leaves the
+            # recommendation permanently unimplementable.
+            run.error = (
+                f"a previous run of #{recommendation_id} was interrupted and left "
+                f"{abandoned} checked out with uncommitted changes. Those are "
+                "ALENA's own, not yours. Re-run with --recover to discard them "
+                "and start again, or look at them first."
+            )
+            return run
+
+        if abandoned and recover:
+            logger.info(f"{repository.id}: discarding an interrupted run on {abandoned}")
+            _restore(git, repository.default_branch, abandoned)
+            state = git.state()
+
+        if state.dirty:
+            # Committing someone's work-in-progress alongside a generated change
+            # is not recoverable by reading the diff afterwards. Untracked files
+            # count: the commit below stages everything, on this check's word.
+            listed = ", ".join(state.dirty_files[:8])
+            if len(state.dirty_files) > 8:
+                listed += f", and {len(state.dirty_files) - 8} more"
+            run.error = (
+                f"{repository.workspace} has uncommitted changes ({listed}). "
+                "Commit, stash or ignore them first; the action agent stages "
+                "everything it finds and will not mix them into its branch."
+            )
+            return run
 
     base = state.branch or repository.default_branch
     run.base_branch = base
@@ -318,6 +341,23 @@ async def implement_async(
 
     run.status = "failed"
     return run
+
+
+def _abandoned_run(
+    recommendation_id: int, current_branch: Optional[str], conn=None
+) -> Optional[str]:
+    """The branch left behind by an interrupted run of this recommendation.
+
+    Recognised by a row still marked `started` -- written before any work
+    begins precisely so an interrupted run is findable -- whose branch is the
+    one currently checked out.
+    """
+    from ..persistence import implementations_for
+
+    for row in implementations_for(recommendation_id, conn):
+        if row["status"] == "started" and row["branch"] and row["branch"] == current_branch:
+            return row["branch"]
+    return None
 
 
 def _run_suites(workspace: Path, suites: List[tuple]) -> TestResult:

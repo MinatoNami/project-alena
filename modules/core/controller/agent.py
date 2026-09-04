@@ -34,7 +34,9 @@ def _build_server_config(mcp_server_key: str) -> SimpleNamespace:
         command=sys.executable,
         args=["-m", "app.main"],
         cwd=os.path.abspath(os.path.join(base_dir, folder)),
-        env=None,
+        # Unbuffered, so the server's progress on stderr reaches whoever is
+        # watching while the work happens rather than after it.
+        env={**os.environ, "PYTHONUNBUFFERED": "1"},
         encoding="utf-8",
         encoding_error_handler="replace",
         stderr_to_stdout=False,

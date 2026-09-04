@@ -522,3 +522,89 @@ def test_the_directory_appears_in_the_description():
     from modules.improve.action.verify import TestResult
 
     assert "frontend" in TestResult("npm test", True, "", "frontend").describe()
+
+
+# -- picking up after a run that was killed --------------------------------
+
+
+def _interrupted(repo, writable, accepted):
+    """Leave exactly what a killed run leaves: its branch checked out, its
+    work uncommitted, and a row still marked started."""
+    from modules.improve.action.implement import branch_name
+    from modules.improve.persistence import record_implementation
+
+    branch = branch_name(accepted, "Add a farewell function")
+    git(repo, "checkout", "-q", "-b", branch)
+    (repo / "half_written.py").write_text("VALUE = 1\n")
+    record_implementation(
+        recommendation_id=accepted,
+        repository_id=writable.id,
+        implemented_by="codex",
+        branch=branch,
+        base_branch="main",
+    )
+    return branch
+
+
+def test_an_interrupted_run_is_recognised_rather_than_blamed_on_you(
+    repo, writable, accepted
+):
+    """"You have uncommitted changes" about something ALENA wrote is unhelpful,
+    and leaves the recommendation permanently unimplementable."""
+    branch = _interrupted(repo, writable, accepted)
+
+    outcome = run(writable, accepted)
+
+    assert not outcome.ok
+    assert "was interrupted" in outcome.error
+    assert branch in outcome.error
+    assert "--recover" in outcome.error
+
+
+def test_nothing_is_discarded_without_being_asked(repo, writable, accepted):
+    _interrupted(repo, writable, accepted)
+
+    run(writable, accepted)
+
+    assert (repo / "half_written.py").exists()
+
+
+def test_recover_discards_it_and_starts_again(repo, writable, accepted):
+    _interrupted(repo, writable, accepted)
+
+    outcome = run(writable, accepted, recover=True)
+
+    assert outcome.ok
+    assert not (repo / "half_written.py").exists()
+    assert outcome.files_changed == ["new_module.py"]
+
+
+def test_your_own_uncommitted_work_is_still_refused(repo, writable, accepted):
+    """Recovery is only for what an interrupted run of this recommendation
+    left; it is not a licence to clean the workspace."""
+    (repo / "app.py").write_text("someone was working here\n")
+
+    outcome = run(writable, accepted, recover=True)
+
+    assert not outcome.ok
+    assert "uncommitted changes" in outcome.error
+    assert "app.py" in outcome.error
+
+
+def test_a_stale_row_for_another_branch_is_not_treated_as_this_one(
+    repo, writable, accepted
+):
+    from modules.improve.persistence import record_implementation
+
+    record_implementation(
+        recommendation_id=accepted,
+        repository_id=writable.id,
+        implemented_by="codex",
+        branch="alena/99-something-else",
+        base_branch="main",
+    )
+    (repo / "scratch.txt").write_text("yours\n")
+
+    outcome = run(writable, accepted)
+
+    assert "uncommitted changes" in outcome.error
