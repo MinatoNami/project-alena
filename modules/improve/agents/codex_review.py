@@ -39,6 +39,7 @@ from .prompting import (
     observation_block,
     operator_note,
     preamble_for,
+    near_duplicate_block,
     priors_block,
 )
 
@@ -83,7 +84,7 @@ running inside. Decide whether it makes engineering sense *here*.
 {preamble_for(observation.get("source"))}
 
 Do not modify anything. This is a read-only review.
-{operator_note(note)}{priors_block(priors)}
+{operator_note(note)}{priors_block(priors)}{near_duplicate_block(observation)}
 Repository: {repository_name}
 {f"Context:{chr(10)}{context}{chr(10)}" if context else ""}
 {observation_block(observation)}

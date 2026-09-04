@@ -156,6 +156,81 @@ Remove every file.
     assert len(second.duplicates) == 1
 
 
+NEAR_DOCUMENT = """# Research: sample
+
+Repository: sample
+Source: chatgpt-work
+
+## Running text recognition on the machine itself
+
+Wholly different wording for the same underlying idea.
+"""
+
+
+def test_a_flagged_observation_is_reviewed_and_carries_the_question(
+    repository, monkeypatch
+):
+    """The band's point: not skipped, but the reviewer is asked about it.
+
+    The vectors are fixed rather than taken from a live model, so the cosine
+    is exactly the 0.83 the real Nuxt pair scored.
+    """
+    import math
+
+    import modules.improve.research.ingest as ingest_module
+    from modules.improve.persistence import observations_for
+
+    angle = math.acos(0.83)
+    vectors = {"first": [1.0, 0.0], "second": [math.cos(angle), math.sin(angle)]}
+    which = ["first"]
+    monkeypatch.setattr(ingest_module, "embed_text", lambda text: vectors[which[0]])
+
+    ingest_text(repository, RESEARCH, use_embeddings=True)
+    which[0] = "second"
+    result = ingest_text(repository, NEAR_DOCUMENT, use_embeddings=True)
+
+    assert result.duplicates == [], "a flag must not be a skip"
+    assert result.accepted, "a flagged observation is still accepted"
+    assert result.flagged == result.accepted
+
+    rows = [r for r in observations_for(repository.id) if r["near_duplicate_reason"]]
+    assert rows, "nothing carried the question forward"
+    assert "0.83" in rows[0]["near_duplicate_reason"]
+    assert rows[0]["duplicate_reason"] is None
+
+
+def test_a_flagged_observation_reaches_the_reviewer_with_the_question(
+    repository, monkeypatch
+):
+    import math
+
+    import modules.improve.research.ingest as ingest_module
+
+    angle = math.acos(0.83)
+    vectors = {"first": [1.0, 0.0], "second": [math.cos(angle), math.sin(angle)]}
+    which = ["first"]
+    monkeypatch.setattr(ingest_module, "embed_text", lambda text: vectors[which[0]])
+
+    ingest_text(repository, RESEARCH, use_embeddings=True)
+    which[0] = "second"
+    ingest_text(repository, NEAR_DOCUMENT, use_embeddings=True)
+
+    prompts = []
+
+    async def capture(server, tool, arguments, **kwargs):
+        prompts.append(arguments["question"])
+        return codex_result(SUPPORTED)
+
+    import asyncio
+
+    asyncio.run(review_repository_async(repository, executor=capture))
+
+    flagged = [p for p in prompts if "similarity check flagged this" in p]
+    assert flagged, "the question never reached the reviewer"
+    assert "0.83" in flagged[0]
+    assert "not a judgement" in flagged[0]
+
+
 def test_an_observation_is_not_shown_its_own_recommendation_as_prior_art():
     """The trap in widening the prior list: rejecting an idea as itself.
 

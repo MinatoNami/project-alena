@@ -44,6 +44,15 @@ TITLE_MATCH = 1.0
 TITLE_TOKEN_THRESHOLD = 0.65
 TOKEN_THRESHOLD = 0.72
 EMBEDDING_THRESHOLD = 0.90
+# Below the bar but too close to ignore. A skip is silent, so its threshold
+# has to be cautious; that leaves a band where the honest answer is not a
+# decision but a question, and there is something well placed to answer it --
+# the reviewer, which reads both and can say whether they are the same idea.
+#
+# Only for embeddings. Token and title overlap near-misses are mostly ideas
+# that share vocabulary, and flagging those would train the reviewer to skim
+# past the flag.
+NEAR_EMBEDDING_THRESHOLD = 0.80
 
 
 def cosine(a: Sequence[float], b: Sequence[float]) -> float:
@@ -115,6 +124,31 @@ class DedupVerdict:
         if self.matched.status == "rejected" and self.matched.reason:
             return f"{where} — {self.matched.reason} [{detail}]"
         return f"{where} [{detail}]"
+
+    @property
+    def near(self) -> bool:
+        """Close enough that a person should look, not close enough to skip."""
+        return (
+            not self.duplicate
+            and self.matched is not None
+            and self.method == "embedding"
+            and self.similarity >= NEAR_EMBEDDING_THRESHOLD
+        )
+
+    @property
+    def near_reason(self) -> Optional[str]:
+        """Put to the reviewer as a question, because it is one.
+
+        Phrased so that "no, they are different" is as easy an answer as
+        "yes". A flag that reads like an accusation gets agreed with.
+        """
+        if not self.near or self.matched is None:
+            return None
+        return (
+            f"{self.matched.kind} #{self.matched.id} "
+            f"({where_it_stands(self.matched.status)}) is close to this one "
+            f"— {self.similarity:.2f} similarity. \"{self.matched.title}\""
+        )
 
 
 def check(

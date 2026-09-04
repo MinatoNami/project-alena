@@ -39,6 +39,9 @@ class IngestResult:
     accepted: List[str] = field(default_factory=list)
     duplicates: List[str] = field(default_factory=list)
     embeddings_used: bool = False
+    # Accepted, but close enough to something already proposed that the
+    # reviewer is asked about it. A subset of `accepted`, not a rejection.
+    flagged: List[str] = field(default_factory=list)
     error: Optional[str] = None
 
     @property
@@ -132,6 +135,16 @@ def ingest_text(
             ),
             duplicate_reason=verdict.reason,
             similarity=verdict.similarity,
+            # Set instead of `duplicate_of` when the match is in the band
+            # between "skip it" and "unrelated". The observation is still
+            # reviewed; the reviewer is the one asked to decide.
+            near_duplicate_of=(
+                verdict.matched.id
+                if verdict.near and verdict.matched.kind == "recommendation"
+                else None
+            ),
+            near_duplicate_reason=verdict.near_reason,
+            near_similarity=verdict.similarity if verdict.near else None,
             embedding=pack_embedding(embedding) if embedding else None,
             source=parsed.source or source,
             conn=conn,
@@ -140,6 +153,12 @@ def ingest_text(
             logger.info(f"{repository.id}: skipping duplicate — {verdict.reason}")
             result.duplicates.append(observation.title)
         else:
+            if verdict.near:
+                logger.info(
+                    f"{repository.id}: flagging for the reviewer — "
+                    f"{verdict.near_reason}"
+                )
+                result.flagged.append(observation.title)
             result.accepted.append(observation.title)
 
     if not result.embeddings_used and parsed.observations:

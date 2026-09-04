@@ -1,7 +1,9 @@
+import math
 import pytest
 
 from modules.improve.recommend.dedup import (
     EMBEDDING_THRESHOLD,
+    NEAR_EMBEDDING_THRESHOLD,
     PriorRecommendation,
     check,
     cosine,
@@ -137,6 +139,93 @@ def test_a_distant_embedding_is_not_a_duplicate():
         embedding=pack_embedding([1.0, 0.0]),
     )
     assert not check("Y", "Y", [prior], embedding=[0.0, 1.0]).duplicate
+
+
+def _vector_at(angle: float) -> list:
+    """A unit vector whose cosine against [1, 0] is cos(angle)."""
+    return [math.cos(angle), math.sin(angle)]
+
+
+def _prior_at(similarity: float, **kwargs) -> PriorRecommendation:
+    fields = {
+        "id": 2,
+        "title": "Nuxt 4 is now the supported line",
+        "normalized_title": "4 line now nuxt supported",
+        "status": "accepted",
+        "body": "Wholly different wording.",
+    }
+    fields.update(kwargs)
+    return PriorRecommendation(
+        embedding=pack_embedding(_vector_at(math.acos(similarity))), **fields
+    )
+
+
+def test_a_similarity_in_the_band_is_flagged_not_skipped():
+    """0.83 is what the real pair scored: too close to ignore, too far to act.
+
+    Skipping is silent, so acting on this would throw away a real idea with
+    nobody seeing it.
+    """
+    prior = _prior_at(0.83)
+    verdict = check("Nuxt 3 is in maintenance", "Body", [prior], embedding=[1.0, 0.0])
+
+    assert not verdict.duplicate
+    assert verdict.near
+    assert verdict.reason is None, "a flag is not a skip"
+    assert "#2" in verdict.near_reason
+    assert "already accepted and awaiting implementation" in verdict.near_reason
+
+
+def test_a_similarity_above_the_bar_is_still_skipped_outright():
+    verdict = check("Whatever", "Body", [_prior_at(0.95)], embedding=[1.0, 0.0])
+
+    assert verdict.duplicate
+    assert not verdict.near, "a skip is not also a flag"
+
+
+def test_a_similarity_below_the_band_is_left_alone():
+    verdict = check("Whatever", "Body", [_prior_at(0.47)], embedding=[1.0, 0.0])
+
+    assert not verdict.duplicate
+    assert not verdict.near
+    assert verdict.near_reason is None
+
+
+@pytest.mark.parametrize(
+    "similarity,flagged",
+    [
+        (0.79, False),
+        # Not NEAR_EMBEDDING_THRESHOLD exactly: embeddings are packed as
+        # float32, so 0.80 round-trips as 0.79999999 and lands on the wrong
+        # side. The boundary is only meaningful to about 1e-7, which is fine
+        # for a threshold picked by judgement, but not something to assert on.
+        (NEAR_EMBEDDING_THRESHOLD + 1e-4, True),
+        (0.89, True),
+    ],
+)
+def test_the_band_edges(similarity, flagged):
+    verdict = check("Whatever", "Body", [_prior_at(similarity)], embedding=[1.0, 0.0])
+    assert verdict.near is flagged
+
+
+def test_token_overlap_near_misses_are_not_flagged():
+    """Only the semantic layer. Shared vocabulary is not a shared idea, and a
+    flag that fires on it teaches the reviewer to skim past the flag."""
+    prior = PriorRecommendation(
+        id=3,
+        title="Cache rendered cover mosaics on disk",
+        normalized_title="cache cover disk mosaics rendered",
+        status="rejected",
+        body="Cache the rendered cover mosaics on disk to save work.",
+    )
+    verdict = check(
+        "Cache rendered thumbnails in memory",
+        "Cache the rendered thumbnails in memory to save work.",
+        [prior],
+    )
+
+    assert not verdict.duplicate
+    assert not verdict.near
 
 
 def test_embeddings_round_trip():

@@ -107,6 +107,37 @@ def observation_block(observation: Dict[str, Any]) -> str:
     )
 
 
+def near_duplicate_block(observation: Dict[str, Any]) -> str:
+    """A similarity score that was not decisive, handed over as a question.
+
+    De-duplication skips silently, so its bar is high and a genuine paraphrase
+    can land just under it -- two proposals to move the same app off Nuxt 3
+    scored 0.83 against a 0.90 bar. Rather than lower the bar and start
+    discarding real ideas unseen, that band comes here.
+
+    Written to be easy to disagree with. A number presented as evidence gets
+    deferred to, and the failure here is not missing a duplicate -- the
+    reviewer sees the full prior list anyway -- it is rejecting a good idea
+    because a machine implied it should. So the score is named as what it is,
+    the reviewer is told plainly it is often wrong, and "they are different"
+    is offered as the expected answer rather than the awkward one.
+    """
+    reason = (observation.get("near_duplicate_reason") or "").strip()
+    if not reason:
+        return ""
+    return (
+        "\nA similarity check flagged this, without being confident enough to "
+        "act on it:\n"
+        f"  {strip_delimiters(reason)}\n"
+        "That is a text-similarity score, not a judgement. It is routinely "
+        "wrong about two proposals that share a subject but differ in what "
+        'they actually change. Read both. If they are the same, answer '
+        '"rejected" and say which. If they are not, ignore this and judge the '
+        "observation on its own -- saying so is a useful answer, not a failure "
+        "to find something.\n"
+    )
+
+
 def priors_block(priors: Optional[List[Dict[str, Any]]]) -> str:
     """Everything already proposed for this repository, and where it stands.
 

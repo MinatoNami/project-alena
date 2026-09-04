@@ -316,6 +316,25 @@ proposal that was already turned down is the expensive half of the mistake:
 | Token overlap | Near-verbatim restatement | nothing |
 | Embedding cosine | Genuine paraphrase | an embedding model loaded |
 
+A match above its threshold is **skipped silently**, which is why the
+thresholds are cautious: a false positive throws away a real idea with nobody
+seeing it. That caution costs something at the other end — the two LumaIndex
+proposals to move off Nuxt 3 scored 0.83 against a 0.90 bar, and both reached
+the queue for a human to spot.
+
+So cosine has a second, lower bar. Between 0.80 and 0.90 an observation is
+**flagged rather than skipped**: it is reviewed as normal, and the reviewer is
+told what it resembles and asked to decide. That band exists because the
+honest answer there is not a decision but a question, and the reviewer can
+read both proposals and answer it.
+
+The flag is worded to be easy to disagree with. A similarity score presented
+as evidence gets deferred to, and the expensive mistake is not missing a
+duplicate — the reviewer sees the full prior list anyway — it is rejecting a
+good idea because a number implied it should. Only cosine feeds the band;
+token and title near-misses are mostly ideas sharing vocabulary, and flagging
+those would teach the reviewer to skim past the flag.
+
 LM Studio serves embeddings only when an embedding model occupies its
 embedding slot, which is separate from the chat slot. With that slot empty —
 the usual state of an install set up for chat — layers 1 and 2 still run, and
