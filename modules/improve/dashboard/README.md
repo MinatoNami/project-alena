@@ -132,6 +132,8 @@ not be choosing one.
 | Queue | What is proposed, the evidence, both reviewers' verdicts — accept or reject |
 | Repositories | Profile, summary, languages, recommendation history |
 | Portfolio | Divergent pins, shared dependencies, work that might travel |
+| History | Every scan, ingest, review, decision and implementation, by day |
+| Propose | An idea of your own, entering where research does |
 | Tools | Effectiveness from the audit log |
 
 The status page refreshes every 30 seconds, because the numbers move when a

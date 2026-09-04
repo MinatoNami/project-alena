@@ -151,4 +151,13 @@ def write_profile(scan: Dict[str, Any], root: Optional[Path] = None) -> Path:
 
 
 def utcnow() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    """The timestamp every record is stamped with.
+
+    Milliseconds, not seconds. A scan and the research ingested right after it
+    land in the same second, and at second precision the history has no
+    defined order for them -- which is the one thing a timeline has to get
+    right. Mixed precision still sorts correctly as strings, because "+" sorts
+    before "." so an older seconds-only row precedes a sub-second one in the
+    same second.
+    """
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")

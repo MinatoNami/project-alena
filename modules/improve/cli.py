@@ -650,6 +650,37 @@ def cmd_propose(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_history(args: argparse.Namespace) -> int:
+    """Everything that has happened, newest first."""
+    from .history import KINDS, counts, timeline
+
+    registry = load_registry(args.registry)
+    repository_id = None
+    if args.repository:
+        repository_id = registry.resolve(args.repository).id
+
+    events = timeline(repository_id, args.kind or None, args.limit)
+    if not events:
+        print("Nothing has happened yet.")
+        return 0
+
+    width = max(len(e.repository_id) for e in events)
+    for event in events:
+        marker = "!" if event.adverse else " "
+        print(
+            f"{marker} {event.at[:16].replace('T', ' ')}  {event.kind:<14} "
+            f"{event.repository_id:<{width}}  {event.summary}"
+        )
+        if args.detail and event.detail:
+            print(f"      {event.detail.strip()[:160]}")
+
+    if not args.repository:
+        totals = counts()
+        print()
+        print("  " + " · ".join(f"{k} {v}" for k, v in totals.items() if v))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     # Config paths are accepted both before and after the subcommand: the
     # natural thing to type is `scan --all --registry x`, but the global form
@@ -852,6 +883,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     proposal.add_argument("--evidence", help="Links or references, if any")
     proposal.set_defaults(func=cmd_propose)
+
+    history_cmd = sub.add_parser(
+        "history", parents=[common], help="Everything that has happened, newest first"
+    )
+    history_cmd.add_argument("repository", nargs="?")
+    history_cmd.add_argument(
+        "--kind",
+        action="append",
+        choices=("scan", "research", "review", "decision", "implementation"),
+        help="Only this kind of event. Repeatable.",
+    )
+    history_cmd.add_argument("--limit", type=int, default=50)
+    history_cmd.add_argument("--detail", action="store_true", help="Show the detail line")
+    history_cmd.set_defaults(func=cmd_history)
 
     return parser
 

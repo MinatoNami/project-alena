@@ -529,6 +529,30 @@ Nightly, via launchd:
 <dict><key>Hour</key><integer>2</integer><key>Minute</key><integer>0</integer></dict>
 ```
 
+## What has actually happened
+
+```bash
+scripts/alena_improve.sh history                    # everything, newest first
+scripts/alena_improve.sh history luma-index
+scripts/alena_improve.sh history --kind review --kind decision
+```
+
+The record already existed, spread across five tables that each answer a
+different question. `history.py` assembles them into the one question none of
+them could answer alone: *what has happened here, in order.*
+
+Scans and reviews are the bulk of it; research, decisions and implementations
+are included because a review with no visible outcome is half a story. The
+useful reading is "this was reviewed, then rejected, then proposed again", and
+that needs all five to be legible.
+
+Events that went the unhappy way — a rejection, a failed implementation, an
+errored review — are marked once, in one place, so every consumer agrees on
+what counts as bad news.
+
+There is a page for it in the dashboard, grouped by day and filterable by
+repository and kind.
+
 ## Are the tools earning their place?
 
 ```bash

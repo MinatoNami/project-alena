@@ -351,3 +351,44 @@ def test_a_proposal_with_no_title_is_refused(client):
     )
 
     assert response.status_code == 422
+
+
+# -- history ---------------------------------------------------------------
+
+
+def test_history_returns_a_timeline(client, repo):
+    from modules.improve.registry import load_registry
+    from modules.improve.scan_run import scan_repository
+
+    scan_repository(load_registry().resolve("sample"), summarize=False)
+
+    body = client.get("/api/history").json()
+    assert body["events"]
+    assert body["counts"]["scan"] == 1
+    assert "review" in body["kinds"]
+
+
+def test_history_can_be_filtered_by_kind(client, repo):
+    from modules.improve.registry import load_registry
+    from modules.improve.scan_run import scan_repository
+
+    scan_repository(load_registry().resolve("sample"), summarize=False)
+
+    assert client.get("/api/history?kind=review").json()["events"] == []
+    assert client.get("/api/history?kind=scan").json()["events"]
+
+
+def test_an_unknown_kind_is_a_400(client):
+    response = client.get("/api/history?kind=invented")
+
+    assert response.status_code == 400
+    assert "scan" in response.json()["detail"]
+
+
+def test_history_for_an_unknown_repository_is_a_404(client):
+    assert client.get("/api/history?repository_id=nope").status_code == 404
+
+
+def test_history_needs_no_dashboard_header(client):
+    """It only reads."""
+    assert client.get("/api/history").status_code == 200

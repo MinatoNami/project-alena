@@ -5,6 +5,7 @@ const links = [
   { to: '/propose', label: 'Propose' },
   { to: '/repositories', label: 'Repositories' },
   { to: '/portfolio', label: 'Portfolio' },
+  { to: '/history', label: 'History' },
   { to: '/tools', label: 'Tools' },
 ]
 </script>

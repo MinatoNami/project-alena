@@ -353,3 +353,31 @@ def test_the_queue_drops_a_recommendation_once_it_is_decided(
 
     run("queue", "sample", "--registry", registry_file)
     assert "Nothing is awaiting a decision" in capsys.readouterr().out
+
+
+def test_history_on_an_empty_system(registry_file, capsys):
+    assert run("history", "--registry", registry_file) == 0
+    assert "Nothing has happened yet" in capsys.readouterr().out
+
+
+def test_history_lists_events_newest_first(registry_file, repository, capsys):
+    from modules.improve.research import ingest_text
+    from modules.improve.scan_run import scan_repository
+
+    scan_repository(repository, summarize=False)
+    ingest_text(repository, RESEARCH_DOC, use_embeddings=False)
+
+    assert run("history", "--registry", registry_file) == 0
+    out = capsys.readouterr().out
+    assert "research" in out
+    assert "scan" in out
+    assert out.index("research") < out.index("scan"), "newest first"
+
+
+def test_history_can_be_filtered(registry_file, repository, capsys):
+    from modules.improve.scan_run import scan_repository
+
+    scan_repository(repository, summarize=False)
+
+    assert run("history", "--kind", "review", "--registry", registry_file) == 0
+    assert "Nothing has happened yet" in capsys.readouterr().out

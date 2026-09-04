@@ -469,6 +469,36 @@ def create_app() -> FastAPI:
             "message": result.describe(),
         }
 
+    @app.get("/api/history")
+    async def get_history(
+        repository_id: Optional[str] = None,
+        kind: Optional[str] = None,
+        limit: int = 100,
+    ) -> Dict[str, Any]:
+        from modules.improve.history import KINDS, counts, timeline
+
+        if repository_id:
+            try:
+                registry().resolve(repository_id)
+            except RegistryError as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from None
+
+        kinds = [k for k in (kind or "").split(",") if k] or None
+        if kinds and any(k not in KINDS for k in kinds):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown kind. Expected any of: {', '.join(KINDS)}",
+            )
+
+        return {
+            "events": [
+                e.to_dict()
+                for e in timeline(repository_id, kinds, min(limit, 500))
+            ],
+            "counts": counts(repository_id),
+            "kinds": list(KINDS),
+        }
+
     @app.get("/api/portfolio")
     async def get_portfolio() -> Dict[str, Any]:
         return query.portfolio_snapshot(registry())
