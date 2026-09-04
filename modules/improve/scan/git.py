@@ -105,6 +105,9 @@ class GitRepository:
         name = self.run("rev-parse", "--abbrev-ref", "HEAD", check=False).strip()
         return name or None
 
+    def branches(self) -> List[str]:
+        return self._lines("for-each-ref", "--format=%(refname:short)", "refs/heads")
+
     def dirty_files(self) -> List[str]:
         return [line[3:] for line in self._lines("status", "--porcelain")]
 

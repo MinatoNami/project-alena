@@ -105,6 +105,40 @@ def test_a_branch_is_named_after_the_recommendation():
     assert branch_name(3, "Semantic library search") == "alena/3-semantic-library-search"
 
 
+def test_a_second_attempt_gets_its_own_branch():
+    """Before this, every retry died on the branch it was retrying."""
+    from modules.improve.action.implement import free_branch_name
+
+    first = branch_name(2, "Nuxt 4 is the supported line")
+
+    assert free_branch_name(2, "Nuxt 4 is the supported line", []) == first
+    assert (
+        free_branch_name(2, "Nuxt 4 is the supported line", [first])
+        == f"{first}-attempt-2"
+    )
+    assert (
+        free_branch_name(2, "Nuxt 4 is the supported line", [first, f"{first}-attempt-2"])
+        == f"{first}-attempt-3"
+    )
+
+
+def test_an_earlier_attempt_is_left_alone(repo, writable, accepted):
+    """It holds a real commit; a retry does not get to decide it is rubbish."""
+    first = run(writable, accepted)
+
+    from modules.improve.decide import ACCEPTED as A, UNSUCCESSFUL, decide as record
+
+    record(writable.id, accepted, UNSUCCESSFUL, reason="tests failed")
+    record(writable.id, accepted, A)
+    second = run(writable, accepted)
+
+    assert second.ok
+    assert second.branch != first.branch
+    branches = git(repo, "branch", "--list")
+    assert first.branch in branches
+    assert second.branch in branches
+
+
 def test_a_hostile_title_cannot_shape_the_branch_name():
     """The title carries research text; it becomes a git argument."""
     name = branch_name(1, "x; rm -rf / --upload-pack=touch#$(whoami)")

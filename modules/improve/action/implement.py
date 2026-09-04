@@ -21,7 +21,7 @@ import asyncio
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from modules.core.controller.logger import logger
 from modules.gateway import ActionGrant, get_gateway
@@ -86,6 +86,31 @@ def is_generated_artifact(path: str) -> bool:
 def branch_name(recommendation_id: int, title: str) -> str:
     slug = _SLUG.sub("-", title.lower()).strip("-")[:48].strip("-")
     return f"{BRANCH_PREFIX}{recommendation_id}-{slug or 'change'}"
+
+
+def free_branch_name(recommendation_id: int, title: str, taken: Iterable[str]) -> str:
+    """The branch for this attempt, not colliding with an earlier one.
+
+    A second attempt at the same recommendation wants the same name, and
+    `checkout -b` refuses -- so before this, every retry died on the branch
+    left by the attempt it was retrying.
+
+    The earlier branch is kept rather than reused or deleted. It holds a real
+    commit somebody may still want to read, and "the previous attempt is
+    gone" is not a thing a retry should decide on their behalf.
+    """
+    first = branch_name(recommendation_id, title)
+    existing = set(taken)
+    if first not in existing:
+        return first
+    for attempt in range(2, 100):
+        candidate = f"{first}-attempt-{attempt}"
+        if candidate not in existing:
+            return candidate
+    raise GitError(
+        f"99 branches already exist for recommendation #{recommendation_id}; "
+        "delete some before attempting it again"
+    )
 
 
 @dataclass
@@ -240,7 +265,9 @@ async def implement_async(
 
     base = state.branch or repository.default_branch
     run.base_branch = base
-    run.branch = branch_name(recommendation_id, recommendation["title"])
+    run.branch = free_branch_name(
+        recommendation_id, recommendation["title"], git.branches()
+    )
 
     try:
         run.pairing = pair_for()
