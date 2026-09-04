@@ -201,13 +201,23 @@ def cmd_ingest_research(args: argparse.Namespace) -> int:
 
 
 def cmd_review(args: argparse.Namespace) -> int:
+    from .agents.roster import REVIEW, RosterError, load
+
     registry = load_registry(args.registry)
     install_gateway(registry, args.policy)
     ensure_layout()
 
+    agent = args.agent
+    if agent is None:
+        try:
+            agent = load().agent_for(REVIEW)
+        except RosterError as exc:
+            print(f"The agent configuration cannot be used: {exc}")
+            return 1
+
     failed = 0
     for repository in _targets(registry, args.repository, args.all):
-        if args.agent == "claude":
+        if agent == "claude":
             run = escalate_repository(
                 repository,
                 limit=args.limit,
@@ -467,6 +477,52 @@ def cmd_tools(args: argparse.Namespace) -> int:
             f"{basis['days']} days -- too little to conclude a tool is unused, "
             "so those are marked `unproven` rather than flagged for retirement."
         )
+    return 0
+
+
+def cmd_agents(args: argparse.Namespace) -> int:
+    """Who does which segment, and what every other combination would need."""
+    from .agents.roster import (
+        AGENTS,
+        SEGMENTS,
+        RosterError,
+        config_path,
+        load,
+    )
+
+    try:
+        assignment = load(args.config)
+    except RosterError as exc:
+        print(f"The agent configuration cannot be used: {exc}")
+        return 1
+
+    path = config_path(args.config)
+    print(f"Configured in {path}" if path.exists() else f"No {path}; using defaults")
+    print()
+
+    for segment in SEGMENTS:
+        agent_name = assignment.agent_for(segment)
+        agent = AGENTS[agent_name]
+        print(f"  {segment:9} {agent_name:14} {agent.description}")
+    print()
+
+    if not args.matrix:
+        print("`alena-improve agents --matrix` shows what else is available.")
+        return 0
+
+    print("What each agent can do, and what the rest would need:")
+    print()
+    for name, agent in sorted(AGENTS.items()):
+        print(f"  {name} ({agent.reach}) -- {agent.description}")
+        for segment in SEGMENTS:
+            if agent.can(segment):
+                mark = "yes"
+                reason = "wired"
+            else:
+                mark = "no "
+                reason = agent.why_not(segment)
+            print(f"    {mark}  {segment:9} {reason}")
+        print()
     return 0
 
 
@@ -851,9 +907,11 @@ def build_parser() -> argparse.ArgumentParser:
     review.add_argument(
         "--agent",
         choices=("codex", "claude"),
-        default="codex",
+        # None means "whatever config/agents.yaml assigns to review", so the
+        # flag stays an override for one run rather than the only way to say it.
+        default=None,
         help="codex reviews everything new; claude only what clears the "
-        "escalation thresholds",
+        "escalation thresholds. Defaults to the review agent in agents.yaml",
     )
     review.add_argument(
         "--dry-run",
@@ -945,6 +1003,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip starting the MCP servers to enumerate their tools",
     )
     tools.set_defaults(func=cmd_tools)
+
+    agents_cmd = sub.add_parser(
+        "agents",
+        parents=[common],
+        help="Which agent does which segment of the loop",
+    )
+    agents_cmd.add_argument("--config", help="Path to agents.yaml")
+    agents_cmd.add_argument(
+        "--matrix",
+        action="store_true",
+        help="Every agent and segment, with the reason for each gap",
+    )
+    agents_cmd.set_defaults(func=cmd_agents)
 
     check = sub.add_parser(
         "check-routine",

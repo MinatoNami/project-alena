@@ -21,6 +21,38 @@ they are separate steps with their own capability and their own approval.
 Not built: the Tool Builder (addendum §10–18). Its prerequisite is in place —
 `alena-improve tools` reports metrics from the audit log.
 
+## Who does which segment
+
+Four segments could each be done by a different model: scanning a repository,
+researching it, reviewing what turned up, and acting on a decision.
+[`config/agents.yaml`](../../config/agents.yaml) assigns them, and
+`alena-improve agents --matrix` prints what every agent can actually do.
+
+| Segment | Default | Also available |
+|---|---|---|
+| `scan` | `local` | — |
+| `research` | `chatgpt-work` | — |
+| `review` | `codex` | `claude` |
+| `action` | `codex` | — |
+
+The matrix is a capability statement, not a preference list, and two of its
+gaps are structural rather than unfinished:
+
+* **Acting needs a local write path.** The action agent runs a tool on this
+  machine, through the gateway, against a workspace on this disk. An agent
+  reached over HTTP can read a diff and judge it; it cannot commit to a
+  checkout here.
+* **`chatgpt-work` is not an agent at this end.** It is the source label on a
+  document somebody dropped in the research directory. There is no endpoint to
+  invoke. Research is the one segment allowed to name an agent ALENA cannot
+  call, because that is exactly how research works: documents arrive on
+  somebody else's schedule and the cycle ingests them.
+
+Everything else is a missing adapter, and `agents/roster.py` says which. A
+configuration asking for one is refused when the file is read, naming the
+reason and who can do the job instead — rather than at 02:00 by an agent
+holding work it cannot do.
+
 ## The registry is the authority
 
 Agents are never handed a filesystem path they chose themselves. Every run
