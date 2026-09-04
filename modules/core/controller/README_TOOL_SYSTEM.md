@@ -1,11 +1,13 @@
 # Tool System Architecture
 
-> **Superseded in part.** `tool_definitions.py` is no longer where tools are
-> meant to be declared. The Tool Interoperability Standard makes the MCP
-> definition the canonical contract, and `config/tool_policy.yaml` the place
-> where permissions live. This file is now a *migration shim*: it keeps the
-> existing Codex and Google Calendar tools working while MCP discovery is
-> proven against those servers, and it goes away afterwards.
+> **Superseded.** `tool_definitions.py` is no longer where tools are declared,
+> and no longer where the running system gets them. The Tool Interoperability
+> Standard makes the MCP definition the canonical contract, and
+> `config/tool_policy.yaml` the place where permissions live. Discovery now
+> covers Codex and Google Calendar as well as alena-core, so every tool in a
+> healthy catalog arrives over MCP; this file is the fallback for a server that
+> will not start, plus the capability table the agent loop's intent heuristic
+> reads. It goes away when that heuristic does.
 >
 > **Adding a tool today:** implement it on an MCP server and declare it in
 > `config/tool_policy.yaml`. See [modules/gateway/README.md](../../gateway/README.md).

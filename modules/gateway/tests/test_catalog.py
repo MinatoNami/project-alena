@@ -146,15 +146,46 @@ def test_a_server_claiming_safer_than_policy_is_not_flagged():
     assert c.disagreements() == []
 
 
+def test_drift_is_reported_in_words_a_reader_can_act_on():
+    """The two checks that had no caller. A check that runs nowhere catches
+    nothing, so discovery logs these and `alena-improve tools` prints them."""
+    from modules.gateway.catalog import report_drift
+    from modules.gateway.contracts import SideEffect
+
+    c = catalog()
+    c.register(
+        [
+            ToolContract(name="surprise", source="mcp"),
+            ToolContract(
+                name="a", side_effect_hint=SideEffect.DESTRUCTIVE, source="mcp"
+            ),
+        ]
+    )
+
+    lines = report_drift(c)
+    assert any("surprise" in line and "not declared" in line for line in lines)
+    assert any("read_only" in line and "destructive" in line for line in lines)
+
+
+def test_a_catalog_that_agrees_with_its_policy_reports_nothing():
+    from modules.gateway.catalog import report_drift
+
+    c = catalog()
+    c.register([ToolContract(name="a", source="mcp")])
+
+    assert report_drift(c) == []
+
+
 # --- discovery of ALENA's own servers --------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_alena_core_tools_are_discovered_and_all_declared(tmp_path, monkeypatch):
+async def test_every_tool_is_discovered_and_all_declared(tmp_path, monkeypatch):
     """MCP-first: the contract comes from the server, the policy from the file.
 
     Fails if a tool ships without a policy entry, or a policy entry outlives
-    its tool.
+    its tool. All three servers are discovered, so this now covers the whole
+    catalog rather than just alena-core.
     """
     monkeypatch.setenv("ALENA_DB_PATH", str(tmp_path / "state.db"))
     from modules.gateway.catalog import discover_into
@@ -170,11 +201,46 @@ async def test_alena_core_tools_are_discovered_and_all_declared(tmp_path, monkey
     finally:
         await pool.aclose()
 
-    assert discovered, "alena-core advertised no tools"
+    assert discovered, "no server advertised any tools"
     assert catalog.discovered, "a successful discovery must not run again"
     assert catalog.undeclared() == []
     assert catalog.unimplemented() == []
     assert all(catalog.get(name).contract.source == "mcp" for name in discovered)
+
+
+@pytest.mark.asyncio
+async def test_the_static_shim_describes_the_same_tools_the_servers_do(
+    tmp_path, monkeypatch
+):
+    """The shim's remaining job is to be a fallback, so it must not drift.
+
+    `tool_definitions.py` is only reached when a server will not start. A name
+    in one and not the other means the fallback would offer the planner a tool
+    that does not exist, or withhold one that does -- and it is the deletion of
+    that file that this test is really guarding the way to.
+    """
+    monkeypatch.setenv("ALENA_DB_PATH", str(tmp_path / "state.db"))
+    from modules.gateway.catalog import discover_into
+    from modules.gateway.policy import load_policy
+    from modules.gateway.pool import MCPSessionPool
+
+    static_only = ToolCatalog(load_policy())
+    static_only.register(static_contracts())
+
+    discovered_only = ToolCatalog(load_policy())
+    pool = MCPSessionPool()
+    try:
+        await discover_into(discovered_only, pool)
+    finally:
+        await pool.aclose()
+
+    # alena-core has no static counterpart -- it was born discovered.
+    from_servers = {
+        name
+        for name in discovered_only.names()
+        if discovered_only.get(name).contract.mcp_server != "alena-core"
+    }
+    assert from_servers == set(static_only.names())
 
 
 @pytest.mark.asyncio

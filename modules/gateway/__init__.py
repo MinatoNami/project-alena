@@ -6,7 +6,7 @@ file describes who may call it, and the two stay separate on purpose.
 """
 
 from .contracts import SideEffect, ToolContract
-from .catalog import CatalogEntry, ToolCatalog, static_contracts
+from .catalog import CatalogEntry, ToolCatalog, report_drift, static_contracts
 from .errors import (
     ApprovalRequired,
     GatewayDenied,
@@ -53,6 +53,7 @@ __all__ = [
     "get_pool",
     "load_policy",
     "parse_policy",
+    "report_drift",
     "set_gateway",
     "static_contracts",
 ]

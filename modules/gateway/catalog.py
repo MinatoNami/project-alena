@@ -167,10 +167,18 @@ class ToolCatalog:
         return "\n".join(lines)
 
 
-# The MCP servers ALENA can discover tools from, as (key, folder) pairs. The
-# legacy servers are still described by tool_definitions.py; alena-core is
-# discovered, which is the direction everything moves in.
-DISCOVERABLE_SERVERS = (("alena-core", "alena-core"),)
+# The MCP servers ALENA discovers tools from, as (key, folder) pairs. The key
+# is what a contract carries as `mcp_server`, and the agent loop maps it back
+# to a folder, so it has to stay the name the static definitions already use.
+#
+# All three are discovered now. `static_contracts()` still describes codex and
+# google-calendar, but only as the fallback when a server will not start: a
+# discovered contract wins whenever one arrives.
+DISCOVERABLE_SERVERS = (
+    ("alena-core", "alena-core"),
+    ("codex", "codex-server"),
+    ("google-calendar", "google-calendar"),
+)
 
 
 def server_parameters(folder: str):
@@ -186,6 +194,27 @@ def server_parameters(folder: str):
     return StdioServerParameters(
         command=sys.executable, args=["-m", "app.main"], cwd=root, env={**os.environ}
     )
+
+
+def report_drift(catalog: "ToolCatalog") -> List[str]:
+    """Everything the catalog and the policy currently disagree about.
+
+    `undeclared()` and `disagreements()` have been computed since the gateway
+    shipped and read by nothing outside the tests. A check that runs nowhere
+    catches nothing, so discovery says these out loud and `alena-improve tools`
+    prints them.
+    """
+    lines = [
+        f"{name}: advertised by a server but not declared in the policy, "
+        "so it cannot be called"
+        for name in catalog.undeclared()
+    ]
+    lines.extend(
+        f"{name}: policy says {declared.value}, but its server now hints "
+        f"{hint.value} -- the tool has changed under us"
+        for name, declared, hint in catalog.disagreements()
+    )
+    return lines
 
 
 async def discover_into(catalog: "ToolCatalog", pool=None) -> List[str]:
@@ -210,4 +239,6 @@ async def discover_into(catalog: "ToolCatalog", pool=None) -> List[str]:
         found.extend(c.name for c in contracts)
     if found:
         catalog.discovered = True
+    for line in report_drift(catalog):
+        logger.warning(f"TOOL_CATALOG_DRIFT: {line}")
     return found

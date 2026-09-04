@@ -397,6 +397,7 @@ def cmd_tools(args: argparse.Namespace) -> int:
     from modules.gateway.catalog import (
         ToolCatalog,
         discover_into,
+        report_drift,
         static_contracts,
     )
     from modules.gateway.metrics import (
@@ -446,6 +447,13 @@ def cmd_tools(args: argparse.Namespace) -> int:
         print()
         for tool, note in advice:
             print(f"  {tool}: {note}")
+
+    drift = report_drift(catalog)
+    if drift:
+        print()
+        print("Catalog drift:")
+        for line in drift:
+            print(f"  {line}")
 
     print()
     if basis["judgeable"]:

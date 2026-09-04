@@ -31,10 +31,12 @@ different places:
 | Contract | MCP `tools/list` | the server that implements the tool |
 | Policy | hand-written | `config/tool_policy.yaml` |
 
-`catalog.static_contracts()` is a migration shim that wraps the legacy
-`tool_definitions.py` so the assistant keeps working while discovery is proven
-against the existing servers. Nothing new goes in it. A discovered contract
-always beats a static one, whichever registers first.
+Discovery now covers all three servers, so every contract in a healthy catalog
+comes from MCP. `catalog.static_contracts()` still wraps the legacy
+`tool_definitions.py`, but only as the fallback for a server that will not
+start — nothing new goes in it, and a discovered contract always beats a static
+one, whichever registers first. `test_the_static_shim_describes_the_same_tools_the_servers_do`
+holds the two in agreement until the shim can be deleted outright.
 
 ## The policy fails closed
 
