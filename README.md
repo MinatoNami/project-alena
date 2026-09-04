@@ -1,267 +1,277 @@
 # Project ALENA
 
-**ALENA (Adaptive Learning Enhanced Neural Assistant)** is a locally-run, modular AI assistant designed to act as a privacy-first personal copilot across voice, web, and system workflows.
+[![tests](https://github.com/MinatoNami/project-alena/actions/workflows/tests.yml/badge.svg)](https://github.com/MinatoNami/project-alena/actions/workflows/tests.yml)
 
-It combines **on-device LLMs**, **speech-to-text**, and **extensible MCP (Model Context Protocol) servers** to orchestrate tools, automate actions, and provide natural language interaction without relying on cloud-only inference.
+**ALENA (Adaptive Learning Enhanced Neural Assistant)** is a locally-run,
+modular AI assistant: a privacy-first personal copilot across voice, web and
+system workflows.
 
----
-
-## ✨ Key Features
-
-- 🧠 **Local LLM Inference**
-
-  - LM Studio over its OpenAI-compatible API
-  - Native tool calling, so the planner is not asked to hand-write JSON
-  - Runs on this machine or another one on the tailnet
-
-- 🎙️ **Speech-to-Text Interface**
-
-  - Transcription by [text-whisperer](https://github.com/MinatoNami/text-whisperer)
-    over the tailnet — no model, GPU or audio stack in this repo
-  - WebSocket push-to-talk in the browser; voice memos over Telegram
-
-- 🧩 **MCP-Based Tooling**
-
-  - Modular MCP servers for actions (calendar, reminders, system ops, etc.)
-  - Tool auto-registration & discovery
-  - Clean separation between reasoning and execution
-  - Every call goes through the [Tool Gateway](modules/gateway/README.md):
-    policy decides, the audit log records, pooled MCP sessions execute
-
-- 🌐 **Web Interface**
-
-  - Lightweight frontend (Vue / Nuxt-friendly)
-  - Single-button record → transcribe → infer MVP flow
-  - Designed for rapid iteration
-
-- 🔒 **Privacy-First by Design**
-
-  - Data stays local by default
-  - Optional external integrations
-  - Ideal for home labs, edge devices, and private deployments
-
-- 🤖 **Telegram Bot Gateway**
-  - Bi-directional chat relay to groups
-  - Voice memos → text-whisperer → controller response
-  - Optional reply in source chat or private DM
+It runs inference on a local LLM, acts through MCP tool servers, and reaches
+those tools through a policy gateway that decides, records and executes every
+call. Nothing leaves the machine unless you configure something that does.
 
 ---
 
-## 🏗️ High-Level Architecture
+## Contents
+
+- [What it does](#what-it-does)
+- [Architecture](#architecture)
+- [Repository layout](#repository-layout)
+- [Tools](#tools)
+- [Requirements](#requirements)
+- [Quickstart](#quickstart)
+- [Running each service](#running-each-service)
+- [Configuration](#configuration)
+- [Testing](#testing)
+- [Documentation](#documentation)
+- [Project status](#project-status)
+
+---
+
+## What it does
+
+- **Local LLM inference.** LM Studio over its OpenAI-compatible API, using
+  native tool calling — the planner is never asked to hand-write JSON. Runs on
+  this machine or another one on the tailnet.
+- **Speech to text.** Transcription by
+  [text-whisperer](https://github.com/MinatoNami/text-whisperer) over the
+  tailnet. No model, GPU or audio stack lives in this repo.
+- **MCP tooling.** Three MCP servers, discovered at startup rather than
+  hand-listed. Every call from an ALENA agent goes through the
+  [Tool Gateway](modules/gateway/README.md): the policy decides, the audit log
+  records, a pooled session executes.
+- **Web and voice interfaces.** A Nuxt frontend with WebSocket push-to-talk,
+  and a Telegram bot that accepts text and voice memos.
+- **Autonomous codebase improvement.** Scans declared repositories, ingests
+  research, runs two independent engineering reviewers, and — only behind a
+  recorded human decision — writes a branch. See
+  [modules/improve](modules/improve/README.md).
+
+---
+
+## Architecture
 
 ```
-[ ALENA CLI (alena.py) ]
-          │
-          ▼
-    [ Core Agent Loop ] ───────────────┐
-          │                             │
-          ▼                             ▼
- [ LM Studio (OpenAI API) ]    [ Tool Executor ]
-                                      │
-                        ┌─────────────┴─────────────┐
-                        ▼                           ▼
-               [ MCP Codex Server ]      [ MCP Google Calendar ]
-                        │
-               [ MCP alena-core ]  ── repo / memory / portfolio, read-only
-                        │
-                        ▼
-                  [ Codex CLI ]
-                        │
-                        ▼
-                 [ Repo / Files ]
+  CLI  ·  Web UI  ·  Telegram
+                │
+                ▼
+      ┌───────────────────┐        asks for a plan
+      │  ALENA Controller │ ─────────────────────────►  LM Studio
+      │  (core agent loop)│ ◄─────────────────────────  (local model)
+      └─────────┬─────────┘        prose, or a tool call
+                │
+                │  every tool call
+                ▼
+      ┌───────────────────┐
+      │    Tool Gateway   │   catalog · policy · approval · audit · pool
+      └─────────┬─────────┘
+                │
+      ┌─────────┼─────────────────┐
+      ▼         ▼                 ▼
+ codex-server   google-calendar   alena-core
+ (Codex CLI)    (Calendar API)    repo · memory · portfolio · resources
 
-[ Web / Mobile UI ] ──WS──> [ Voice Assistant Backend ]
-                               │
-              ┌────────────────┴────────────────┐
-              ▼                                 ▼
-   [ text-whisperer (tailnet) ]          [ LLM Router ]
-      MLX Whisper on Apple GPU             │        │
-                                           │        └──> [ LM Studio ]
-                                           └──> [ ALENA Controller ] ──> [ Core Agent Loop ]
-
-[ Telegram Bot ] ──voice──> [ text-whisperer (tailnet) ]
-      │
-      └──text──> [ ALENA Controller (FastAPI) ]
+  Voice:  browser / Telegram  ──►  text-whisperer (tailnet)  ──►  controller
 ```
 
+The planner never invokes a tool. It asks the gateway, which answers a fixed
+set of questions — is the tool in the catalog, are the arguments complete, is
+this agent allowed, is this repository allowed, does a human have to agree —
+logs the attempt, and only then calls it.
 
 ---
 
-## 🚀 Use Cases
+## Repository layout
 
-- Personal AI assistant (voice + chat)
-- Local automation hub
-- Smart home / IoT orchestration
-- Developer productivity assistant
-- Robotics & edge-AI control plane
-- Telegram group assistant (text + voice)
+| Path | What it is |
+|---|---|
+| [`alena.py`](alena.py) | The CLI entry point: one turn per line of input |
+| [`modules/core`](modules/core/README_CORE.md) | The agent loop, planner client, conversation memory, and the FastAPI controller |
+| [`modules/gateway`](modules/gateway/README.md) | Tool catalog, policy, approvals, audit log, pooled MCP sessions |
+| [`modules/improve`](modules/improve/README.md) | The autonomous improvement orchestrator: scan, research, review, decide, act |
+| [`modules/mcp/alena-core`](modules/mcp/alena-core/README.md) | ALENA's own capabilities over MCP, read-only, for Claude / ChatGPT / local models |
+| [`modules/mcp/codex-server`](modules/mcp/codex-server/README.md) | Code generation, analysis and editing via the Codex CLI |
+| [`modules/mcp/google-calendar`](modules/mcp/google-calendar/README.md) | Google Calendar read and write |
+| [`modules/llm`](modules/llm) | The blocking chat client for LM Studio, plus embeddings |
+| [`modules/stt`](modules/stt) | text-whisperer client |
+| [`modules/store`](modules/store) | SQLite connection and migrations (`~/.alena/alena.db`) |
+| [`modules/telegram`](modules/telegram/README.md) | Telegram bot gateway |
+| [`modules/voice-assistant`](modules/voice-assistant/backend/README.md) | Voice backend (FastAPI + WebSocket) and Nuxt frontend |
+| [`config/`](config) | `tool_policy.yaml` and `repositories.yaml` — who may call what, against which repo |
+| [`deploy/launchd`](deploy/launchd/README.md) | Scheduled scan, review, recommend and dashboard jobs |
+| [`scripts/`](scripts/README.md) | Start scripts for each service combination |
+| [`Documents/`](Documents) | Design documents and contracts |
 
 ---
 
-## 🛠️ Tech Stack
+## Tools
 
-- **LLM Runtime:** LM Studio (OpenAI-compatible API)
-- **Speech-to-Text:** text-whisperer (MLX Whisper, remote over Tailscale)
-- **Frontend:** Vue / Nuxt 4 + Tailwind v4 (@tailwindcss/vite) + @nuxt/ui
-- **Backend:** Python / Node.js (modular)
-- **Protocols:** MCP, WebSocket, WebRTC
-- **Deployment:** Local machine, homelab, edge GPU
+Twenty-two tools across three MCP servers, plus five readable resources. Every
+one is declared in [`config/tool_policy.yaml`](config/tool_policy.yaml) with a
+side effect and the agents allowed to call it; **a tool that is not declared
+cannot be called, even if a server advertises it.**
 
-## ✅ Requirements
+| Server | Tools |
+|---|---|
+| codex-server | `codex_generate` `codex_plan` `codex_analyze` `codex_summarize` `codex_doc_outline` `codex_test_plan` (read-only) · `codex_edit` `codex_refactor` (repository write) |
+| google-calendar | `google_list_events` (read) · `google_create_event` `google_update_event` (remote write) · `google_delete_event` (destructive) |
+| alena-core | `repo.search` `repo.find_todos` `repo.get_dependencies` `repo.get_history` `memory.search` `recommendation.search` `portfolio.search_capability` `portfolio.dependency_divergence` `resource.list` `resource.read` — all read-only |
 
-- Python 3.10+
-- **LM Studio**, with a model loaded and its server started (default port 1234)
+alena-core also exposes `alena://repositories`, `alena://repositories/{id}/profile`,
+`.../architecture`, `.../recommendations` and `alena://portfolio/capabilities`
+as MCP resources. `resource.list` and `resource.read` are the doorway for
+clients that cannot read resources — which includes any local model, whose only
+channel is the tools array.
+
+The planner is offered exactly the tools its agent identity may call, built
+from the same catalog and the same policy that will later judge the call.
+
+---
+
+## Requirements
+
+- **Python 3.12 or 3.14** (CI tests both; the code targets 3.10+ but that floor
+  is not exercised)
+- **[LM Studio](https://lmstudio.ai)** with a model loaded and its server
+  started, port 1234 by default
+- **[Codex CLI](https://github.com/openai/codex)** on `$PATH`, for the Codex MCP
+  server. Tested against codex-cli 0.153; older releases took a `--full-auto`
+  flag that 0.153 removed, and the runner passes `--sandbox` instead
 - **[text-whisperer](https://github.com/MinatoNami/text-whisperer)** reachable
-  over the tailnet, for voice — running a build that has `POST /api/transcribe`.
-  See [Documents/TEXT_WHISPERER_CONTRACT.md](Documents/TEXT_WHISPERER_CONTRACT.md).
-- **Codex CLI** (used by the MCP Codex server). If you have access via your plan (e.g., ChatGPT Plus), install the Codex CLI and make sure it’s available in your `$PATH`.
-  Tested against codex-cli 0.153. Older releases took a `--full-auto` flag that
-  0.153 removed; the runner passes `--sandbox` instead.
+  over the tailnet, for voice — see
+  [the contract](Documents/TEXT_WHISPERER_CONTRACT.md)
 
-Notes:
-
-- The MCP Codex server uses the Codex CLI instead of calling the OpenAI API directly.
-- This enables local tool execution and avoids the need to wire an OpenAI API key for code-generation features.
+Only the first is needed to start. The rest degrade to the features that use
+them.
 
 ---
 
-## 🧭 Project Status
-
-- ✅ Local LLM inference (LM Studio, native tool calling)
-- ✅ Remote STT via text-whisperer over the tailnet
-- ✅ Web voice interface MVP (web app usable; supports voice memos via Telegram)
-- ✅ Telegram integration (text + voice memos → controller)
-- ✅ Codex MCP server integration (tool executor wired)
-- ✅ Tool Gateway (policy, approval, audit log, pooled MCP sessions)
-- 🚧 MCP server expansion (more MCPs planned)
-- ✅ Autonomous codebase improvement system — scanning, research ingest, two
-  independent engineering reviewers, a human approval gate, an action agent
-  that writes a reviewed branch (nothing is pushed), portfolio intelligence,
-  and [an MCP server](modules/mcp/alena-core/README.md) exposing all of it.
-  Tool metrics, [launchd templates](deploy/launchd/README.md) and a
-  [Nuxt dashboard](modules/improve/dashboard/README.md) for reviewing and
-  approving. See [modules/improve](modules/improve/README.md),
-  [the research contract](Documents/RESEARCH_DOCUMENT_CONTRACT.md) and
-  [the implementation plan](Documents/ALENA_IMPROVE_IMPLEMENTATION_PLAN.md)
-- 🚧 Adaptive learning (currently stateless; KB + LLM-generated MCP servers coming next)
-
----
-
-## Run (ALENA CLI + MCP Codex server)
-
-From repo root:
+## Quickstart
 
 ```bash
 pip install -r requirements.txt
+cp .env.example .env      # then fill in what you need
 bash scripts/start_alena_with_all_mcps.sh
 ```
 
-Environment variables:
-
-- `LLM_BASE_URL` (default `http://localhost:1234`)
-- `LLM_MODEL` (default: whichever model LM Studio has loaded)
-- `LLM_TIMEOUT` (default `120`)
-
-All services read from the repo root `.env` (see `.env.example`).
+All services read the repo-root `.env`.
 
 ---
 
-## Run (Controller API + MCP Codex server)
+## Running each service
 
-Use this if another service (Voice Assistant or Telegram bot) needs the controller API.
+| Command | What it starts |
+|---|---|
+| `bash scripts/start_alena_with_all_mcps.sh` | The CLI, with every MCP server |
+| `bash scripts/start_controller_with_mcp.sh` | The controller API on `:9000`, for the voice backend and Telegram bot |
+| `bash modules/voice-assistant/backend/scripts/start_server.sh` | Voice backend (WebSocket push-to-talk) |
+| `npm install && npm run dev` in `modules/voice-assistant/frontend` | Nuxt 4 frontend (Tailwind v4, `@nuxt/ui`) |
+| `bash scripts/start_telegram_with_controller_mcp.sh` | Telegram bot wired to the controller |
+| `bash scripts/start_alena_core_mcp.sh` | alena-core over stdio, for an external MCP client |
+| `bash scripts/start_alena_dashboard.sh` | The improvement dashboard |
+| `bash scripts/alena_improve.sh <command>` | The improvement CLI — `scan`, `review`, `recommend`, `pending`, `decide`, `implement`, `portfolio`, `tools`, `status`, and more |
+
+The voice backend imports `modules/llm` and `modules/stt` from the repo root,
+so run it through its script or set `PYTHONPATH` to the repo root yourself.
+`GET /health` on that backend reports whether text-whisperer is actually
+reachable, which is the first thing to check when voice goes quiet.
+
+First-time Google Calendar setup needs one interactive authorisation:
 
 ```bash
-bash scripts/start_controller_with_mcp.sh
+python modules/mcp/google-calendar/scripts/check_credentials.py
 ```
 
-Environment variables:
-
-- `ALENA_CONTROLLER_URL` (default `http://localhost:9000`)
-- `LLM_BASE_URL` (default `http://localhost:1234`)
-- `LLM_MODEL` (default: whichever model LM Studio has loaded)
-- `LLM_TIMEOUT` (default `120`)
-
-All services read from the repo root `.env` (see `.env.example`).
+Nothing else opens a consent screen — the MCP server is started by tool
+discovery on every ALENA process, including background jobs, so it never
+prompts.
 
 ---
 
-## Run (Voice Assistant backend)
+## Configuration
+
+Everything is read from the repo-root `.env`; see
+[`.env.example`](.env.example) for the full list.
+
+**Inference**
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `LLM_BASE_URL` | `http://localhost:1234` | LM Studio |
+| `LLM_MODEL` | *(whatever is loaded)* | Pin a model, or leave blank |
+| `LLM_TIMEOUT` | `120` | Seconds |
+| `LLM_DEBUG` | `0` | Log raw model replies |
+| `ALENA_MAX_TOOL_STEPS` | `3` | Tool calls per turn; the last step is spent on an answer |
+
+**Gateway**
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `ALENA_TOOL_POLICY` | `config/tool_policy.yaml` | Who may call what |
+| `ALENA_DB_PATH` | `~/.alena/alena.db` | Audit log and state, outside the repo on purpose |
+| `ALENA_ALLOWED_REPO_ROOTS` | *(empty)* | Roots a path argument must stay inside |
+| `ALENA_AUDIT_ARGUMENTS` | `0` | Also store redacted arguments |
+| `ALENA_GATEWAY_ENABLED` | `1` | `0` bypasses every policy check. Escape hatch only |
+
+**Services** — `ALENA_CONTROLLER_URL`, `LLM_ROUTE` (`alena` for tool-capable
+answers, `lmstudio` for raw model output), `TEXT_WHISPERER_URL` /
+`TEXT_WHISPERER_TOKEN`, `TELEGRAM_BOT_TOKEN` / `TELEGRAM_TARGET_CHAT_ID` /
+`TELEGRAM_CONTROLLER_ENABLED`, `CALENDAR_TIMEZONE`.
+
+Repositories the improvement system may look at are declared in
+[`config/repositories.yaml`](config/repositories.yaml). Capability
+defaults are asymmetric on purpose: research and analysis default on, anything
+that writes defaults off, and `merge` cannot become true by omission.
+
+---
+
+## Testing
 
 ```bash
-bash modules/voice-assistant/backend/scripts/start_server.sh
+pytest -q
 ```
 
-The backend imports `modules/llm` and `modules/stt` from the repo root, so run
-it through that script or set `PYTHONPATH` to the repo root yourself.
+881 tests, and they run with no `.env`, no `~/.alena`, no LM Studio and no
+Codex CLI — anything needing state builds it under `tmp_path`, and the tests
+that need a live model sit behind `RUN_INTEGRATION_TESTS=1`. CI runs the same
+command on push and pull request against Python 3.12 and 3.14.
 
-Key environment variables:
-
-- `LLM_ROUTE` (`alena` for tool-capable answers, `lmstudio` for raw model output)
-- `ALENA_CONTROLLER_URL` (used when `LLM_ROUTE=alena`)
-- `LLM_BASE_URL` (used when `LLM_ROUTE=lmstudio`, and for the web UI proxy)
-- `TEXT_WHISPERER_URL` / `TEXT_WHISPERER_TOKEN` (transcription)
-
-`GET /health` reports whether text-whisperer is actually reachable, which is
-the first thing to check when voice goes quiet.
+Some of these tests are enforcement rather than description: a tool cannot ship
+without a policy entry, alena-core cannot gain a tool that writes, and the
+executor cannot detach from the gateway. Those are meant to fail the build.
 
 ---
 
-## Run (Voice Assistant frontend)
+## Documentation
 
-From `modules/voice-assistant/frontend`:
-
-```bash
-npm install
-npm run dev
-```
-
-- Styling: Tailwind v4 via `@tailwindcss/vite`, global entry at `app/assets/css/main.css`.
-- UI kit: `@nuxt/ui` is enabled in `nuxt.config.ts`.
-
-## Run (Telegram Bot → Controller)
-
-From repo root:
-
-```bash
-bash scripts/start_telegram_with_controller_mcp.sh
-```
-
-Configure in the repo root `.env`:
-
-- `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_TARGET_CHAT_ID`
-- `TELEGRAM_CONTROLLER_ENABLED=true`
-- `TELEGRAM_CONTROLLER_URL=http://localhost:9000`
-
-Optional:
-
-- `TELEGRAM_SOURCE_CHAT_IDS` (restrict listening)
-- `TELEGRAM_ECHO_IN_TARGET` (allow echo in target)
-- `TELEGRAM_REPLY_IN_SOURCE` (reply in source chat)
-- `TEXT_WHISPERER_URL` (transcription for voice memos)
-- `TEXT_WHISPERER_TOKEN` (its `WEB_PASSWORD`)
-- `TEXT_WHISPERER_SSL_VERIFY` (set `false` for self-signed certs)
+| Document | What it covers |
+|---|---|
+| [Tool Interoperability Standard](<Documents/Tool Interoperability Standard.md>) | Why MCP owns the contract and the policy file owns permission |
+| [Repository & Agent Tool Architecture Addendum](<Documents/Project Alena — Repository & Agent Tool Architecture Addendum.md>) | The registry, grants, and what the gateway must answer |
+| [Autonomous Codebase Improvement System](<Documents/Project Alena — Autonomous Codebase Improvement System.md>) | The design behind `modules/improve` |
+| [Implementation plan](Documents/ALENA_IMPROVE_IMPLEMENTATION_PLAN.md) | Phases and what is done |
+| [Research document contract](Documents/RESEARCH_DOCUMENT_CONTRACT.md) | What a research file must contain to be ingested |
+| [text-whisperer contract](Documents/TEXT_WHISPERER_CONTRACT.md) | The transcription API ALENA expects |
 
 ---
 
-## 🧪 Testing
+## Project status
 
-From repo root:
-
-```bash
-pytest -v
-```
-
----
-
-## 📌 Philosophy
-
-ALENA is designed as a **control plane for intelligence** — not just a chatbot.
-
-It reasons locally, acts through tools, and scales through modular capabilities while keeping user data sovereign.
+- ✅ Local LLM inference with native tool calling
+- ✅ Remote STT over the tailnet; web voice MVP; Telegram text and voice
+- ✅ Tool Gateway — policy, approvals, audit log, pooled sessions
+- ✅ MCP discovery across all three servers; the planner is fed from the catalog
+- ✅ Autonomous improvement: scanning, research ingest, two reviewers, a human
+  approval gate, an action agent that writes a branch — nothing is pushed —
+  portfolio intelligence, launchd schedules and a Nuxt review dashboard
+- 🚧 More MCP servers
+- 🚧 Adaptive learning: currently stateless, with a knowledge base and
+  LLM-generated MCP servers next
 
 ---
 
-## 🙌 Acknowledgements
+## Philosophy
 
-Inspired by modern AI agents, MCP architecture, and the idea of a locally sovereign personal assistant.
+ALENA is a control plane for intelligence, not a chatbot. It reasons locally,
+acts through tools, and grows by adding capabilities — while the data stays
+where it started.
