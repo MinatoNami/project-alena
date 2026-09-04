@@ -43,9 +43,14 @@ class TestListEventsTool:
 
             result = tools.google_list_events()
 
-            assert "Events found:" in result
-            assert "Team Meeting" in result
-            assert "Weekly sync" in result
+            # The listing groups events under a date heading; it used to be a
+            # flat "Events found:" list. Descriptions are deliberately not
+            # rendered -- a long one would bury the day's other events -- so
+            # the tool's docstring no longer promises them either.
+            assert "Events on 20 Jan 2025" in result
+            assert "1. Team Meeting" in result
+            assert "ID: event123" in result
+            assert "Weekly sync" not in result
 
     def test_list_events_empty_result(self):
         """Test listing when no events exist"""

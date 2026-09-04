@@ -18,12 +18,18 @@ class TestGoogleCalendarClientAuthentication:
     """Tests for authentication functionality"""
 
     def test_authenticate_with_existing_valid_token(self, mock_credentials):
-        """Test authentication using existing valid cached token"""
+        """A cached token that is still valid is used as-is, with no OAuth flow.
+
+        The token has been JSON rather than a pickle since the default path
+        became `token.json`; patching `pickle.load` stubbed a branch the client
+        no longer takes, and the test read the real token file off disk.
+        """
         with patch("calendar_client.os.path.exists", return_value=True):
-            with patch("builtins.open", create=True) as mock_open:
-                with patch(
-                    "calendar_client.pickle.load", return_value=mock_credentials
-                ):
+            with patch(
+                "calendar_client.Credentials.from_authorized_user_file",
+                return_value=mock_credentials,
+            ):
+                with patch("calendar_client.InstalledAppFlow") as mock_flow:
                     with patch("calendar_client.build") as mock_build:
                         client = GoogleCalendarClient(
                             credentials_path="test_credentials.json"
@@ -31,6 +37,7 @@ class TestGoogleCalendarClientAuthentication:
 
                         assert client.service is not None
                         mock_build.assert_called_once()
+                        mock_flow.from_client_secrets_file.assert_not_called()
 
     def test_authenticate_with_expired_token(self):
         """Test authentication with expired token that needs refresh"""
@@ -42,17 +49,17 @@ class TestGoogleCalendarClientAuthentication:
         with patch("calendar_client.os.path.exists", return_value=True):
             with patch("builtins.open", create=True):
                 with patch(
-                    "calendar_client.pickle.load", return_value=expired_creds
+                    "calendar_client.Credentials.from_authorized_user_file",
+                    return_value=expired_creds,
                 ):
-                    with patch("calendar_client.pickle.dump"):
-                        with patch.object(expired_creds, "refresh") as mock_refresh:
-                            with patch("calendar_client.build") as mock_build:
-                                client = GoogleCalendarClient(
-                                    credentials_path="test_credentials.json"
-                                )
+                    with patch.object(expired_creds, "refresh") as mock_refresh:
+                        with patch("calendar_client.build") as mock_build:
+                            client = GoogleCalendarClient(
+                                credentials_path="test_credentials.json"
+                            )
 
-                                mock_refresh.assert_called_once()
-                                assert client.service is not None
+                            mock_refresh.assert_called_once()
+                            assert client.service is not None
 
     def test_authenticate_with_new_flow(self):
         """Test authentication with new OAuth flow"""
@@ -69,11 +76,26 @@ class TestGoogleCalendarClientAuthentication:
                     with patch("calendar_client.pickle.dump"):
                         with patch("calendar_client.build") as mock_build:
                             client = GoogleCalendarClient(
-                                credentials_path="test_credentials.json"
+                                credentials_path="test_credentials.json",
+                                interactive=True,
                             )
 
                             assert client.service is not None
                             mock_flow.from_client_secrets_file.assert_called_once()
+
+    def test_a_missing_token_does_not_open_a_browser_by_default(self):
+        """Consent belongs to `scripts/check_credentials.py`, not to an import.
+
+        The MCP server constructs this client at module scope, and discovery
+        now starts that server wherever ALENA runs -- a launchd job included.
+        A consent screen there blocks a process nobody is watching.
+        """
+        with patch("calendar_client.os.path.exists", return_value=False):
+            with patch("calendar_client.InstalledAppFlow") as mock_flow:
+                with pytest.raises(RuntimeError, match="check_credentials"):
+                    GoogleCalendarClient(credentials_path="test_credentials.json")
+
+                mock_flow.from_client_secrets_file.assert_not_called()
 
 
 class TestListEvents:
@@ -118,7 +140,13 @@ class TestListEvents:
         assert len(events) == 0
 
     def test_list_events_with_date_range(self, mock_calendar_client):
-        """Test that date range parameters are properly formatted"""
+        """The window sent to the API is a day wider than the one asked for.
+
+        `list_events` pads by a day at each end on purpose, so an event that
+        starts late on the last day is not cut off by a timezone difference
+        between the caller and the calendar. The assertions below predate that
+        padding and asserted the unpadded dates.
+        """
         mock_calendar_client.service.events.return_value.list.return_value.execute.return_value = {
             "items": []
         }
@@ -129,8 +157,8 @@ class TestListEvents:
 
         mock_calendar_client.service.events.return_value.list.assert_called_once()
         call_kwargs = mock_calendar_client.service.events.return_value.list.call_args[1]
-        assert call_kwargs["timeMin"] == "2025-01-17T00:00:00Z"
-        assert call_kwargs["timeMax"] == "2025-01-24T23:59:59Z"
+        assert call_kwargs["timeMin"] == "2025-01-16T00:00:00Z"
+        assert call_kwargs["timeMax"] == "2025-01-25T23:59:59Z"
         assert call_kwargs["maxResults"] == 5
 
     def test_list_events_api_error(self, mock_calendar_client):

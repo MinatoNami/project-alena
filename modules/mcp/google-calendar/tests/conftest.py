@@ -31,29 +31,35 @@ def mock_credentials():
 
 @pytest.fixture
 def mock_calendar_client(mock_service):
-    """Mock calendar client with mocked service"""
-    with patch("calendar_client.build") as mock_build:
-        mock_build.return_value = mock_service
+    """A client whose credentials and network are stubbed, and nothing else.
+
+    The patches are held only while the client is constructed. They used to
+    wrap the `yield` too, which left `builtins.open` mocked for the body of
+    every test that used this fixture -- so the first lazy `import zoneinfo`
+    inside the code under test read its own tzdata through a MagicMock and
+    died somewhere in `sysconfig`. Which test it hit depended on whether an
+    earlier one had already imported zoneinfo, which is why it looked flaky.
+    """
+    with patch("calendar_client.build", return_value=mock_service):
         with patch("calendar_client.os.path.exists", return_value=False):
             with patch("builtins.open", create=True):
-                with patch("calendar_client.pickle.dump"):
-                    with patch("calendar_client.InstalledAppFlow") as mock_flow:
-                        mock_flow_instance = MagicMock()
-                        mock_flow_instance.run_local_server.return_value = MagicMock(
-                            valid=True
-                        )
-                        mock_flow.from_client_secrets_file.return_value = (
-                            mock_flow_instance
-                        )
+                with patch("calendar_client.InstalledAppFlow") as mock_flow:
+                    mock_flow_instance = MagicMock()
+                    mock_flow_instance.run_local_server.return_value = MagicMock(
+                        valid=True
+                    )
+                    mock_flow.from_client_secrets_file.return_value = mock_flow_instance
 
-                        from calendar_client import GoogleCalendarClient
+                    from calendar_client import GoogleCalendarClient
 
-                        client = GoogleCalendarClient(
-                            credentials_path="test_credentials.json"
-                        )
-                        client.service = mock_service
+                    # interactive: this fixture stands in for a first run,
+                    # where the consent flow is the thing being stubbed.
+                    client = GoogleCalendarClient(
+                        credentials_path="test_credentials.json", interactive=True
+                    )
 
-                        yield client
+    client.service = mock_service
+    yield client
 
 
 @pytest.fixture
