@@ -445,7 +445,14 @@ def test_a_command_that_does_not_take_a_focus_refuses_one():
 
 def test_only_the_analysis_commands_take_a_focus():
     steerable = {k for k, c in COMMANDS.items() if c.accepts_focus}
-    assert steerable == {"scan", "review"}
+    assert steerable == {"cycle", "scan", "review"}
+
+
+def test_the_cycle_button_stops_at_the_gate():
+    """It bundles the four analysis steps and none of the writing one."""
+    args = " ".join(COMMANDS["cycle"].args)
+    assert "implement" not in args
+    assert not COMMANDS["cycle"].writes
 
 
 def test_the_api_passes_a_focus_through(client):

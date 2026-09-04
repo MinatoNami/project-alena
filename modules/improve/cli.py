@@ -17,6 +17,7 @@ from .artifacts import ensure_layout, intelligence_dir
 from .clock import label as timezone_label, local, local_time
 from .action.implement import implement
 from .context_package import build_context_package
+from .cycle import cycle, research_dir
 from .decide import (
     ABANDONED,
     ACCEPTED,
@@ -28,7 +29,13 @@ from .decide import (
     decide,
     history,
 )
-from .persistence import implementations_for, latest_scan, recommendations_for
+from .persistence import (
+    implementations_for,
+    latest_scan,
+    recommendations_for,
+    research_document,
+    research_documents,
+)
 from .query import portfolio_snapshot, search_capability
 from .recommend.render import render_portfolio, write_portfolio
 from .registry import RegistryError, Repository, load_registry
@@ -683,6 +690,74 @@ def cmd_history(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_cycle(args: argparse.Namespace) -> int:
+    """Scan, ingest research, review and score — stopping at the gate."""
+    registry = load_registry(args.registry)
+    install_gateway(registry, args.policy)
+    ensure_layout()
+
+    print(f"Research is read from {research_dir()}/<repository>/")
+    run = cycle(
+        registry,
+        args.repository if not args.all else None,
+        summarize=not args.no_llm,
+        note=args.focus,
+        force=args.force,
+    )
+
+    for entry in run.repositories:
+        print(f"  {entry.describe()}")
+        for title in entry.duplicates:
+            print(f"    already outstanding: {title}")
+
+    print()
+    if run.awaiting_decision:
+        print(
+            f"{run.awaiting_decision} recommendation(s) need a decision before "
+            "anything is built:  alena-improve queue"
+        )
+    else:
+        print("Nothing needs a decision. Nothing has been changed in any repository.")
+    return 1 if run.failed else 0
+
+
+def cmd_research(args: argparse.Namespace) -> int:
+    """What research is on record, and what any of it said."""
+    registry = load_registry(args.registry)
+
+    if args.id is not None:
+        document = research_document(args.id)
+        if document is None:
+            print(f"error: no research document {args.id}", file=sys.stderr)
+            return 2
+        print(f"# {document['title'] or 'Research'}")
+        print(
+            f"  {document['repository_id']} · {document['source']} · "
+            f"{local(document['created_at'])}"
+        )
+        if document["path"]:
+            print(f"  {document['path']}")
+        print()
+        print(document["content"])
+        return 0
+
+    repository_id = registry.resolve(args.repository).id if args.repository else None
+    rows = research_documents(repository_id)
+    if not rows:
+        print("No research on record.")
+        return 0
+
+    for row in rows:
+        print(
+            f"  #{row['id']:<4} {local(row['created_at'])}  "
+            f"{row['repository_id']:<14} {row['source']:<14} "
+            f"{row['observation_count']} observation(s)  {row['title'] or ''}"
+        )
+    print()
+    print("  read one:  alena-improve research --id <n>")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     # Config paths are accepted both before and after the subcommand: the
     # natural thing to type is `scan --all --registry x`, but the global form
@@ -899,6 +974,25 @@ def build_parser() -> argparse.ArgumentParser:
     history_cmd.add_argument("--limit", type=int, default=50)
     history_cmd.add_argument("--detail", action="store_true", help="Show the detail line")
     history_cmd.set_defaults(func=cmd_history)
+
+    cycle_cmd = sub.add_parser(
+        "cycle",
+        parents=[common],
+        help="Scan, ingest research, review and score — stops at the approval gate",
+    )
+    cycle_cmd.add_argument("repository", nargs="?")
+    cycle_cmd.add_argument("--all", action="store_true")
+    cycle_cmd.add_argument("--force", action="store_true", help="Scan even if unchanged")
+    cycle_cmd.add_argument("--no-llm", action="store_true", help="Skip model summaries")
+    cycle_cmd.add_argument("--focus", help="A steer for this run")
+    cycle_cmd.set_defaults(func=cmd_cycle)
+
+    research = sub.add_parser(
+        "research", parents=[common], help="Research on record, and what it said"
+    )
+    research.add_argument("repository", nargs="?")
+    research.add_argument("--id", type=int, help="Print one document in full")
+    research.set_defaults(func=cmd_research)
 
     return parser
 

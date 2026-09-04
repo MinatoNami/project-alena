@@ -52,7 +52,12 @@ from modules.improve.decide import (
     decide,
     history,
 )
-from modules.improve.persistence import implementations_for, recommendations_for
+from modules.improve.persistence import (
+    implementations_for,
+    recommendations_for,
+    research_document,
+    research_documents,
+)
 from modules.improve.registry import RegistryError, load_registry
 from modules.improve.status import summary
 from modules.improve.web.runs import COMMANDS, Busy, get_runner
@@ -510,6 +515,26 @@ def create_app() -> FastAPI:
             "counts": counts(repository_id),
             "kinds": list(KINDS),
         }
+
+    @app.get("/api/research")
+    async def get_research(repository_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """What research is on record. Without the bodies -- they are long."""
+        if repository_id:
+            try:
+                registry().resolve(repository_id)
+            except RegistryError as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from None
+        return research_documents(repository_id)
+
+    @app.get("/api/research/{research_id}")
+    async def get_research_document(research_id: int) -> Dict[str, Any]:
+        """One document in full, with what came out of it."""
+        document = research_document(research_id)
+        if document is None:
+            raise HTTPException(
+                status_code=404, detail=f"No research document {research_id}"
+            )
+        return document
 
     @app.get("/api/portfolio")
     async def get_portfolio() -> Dict[str, Any]:

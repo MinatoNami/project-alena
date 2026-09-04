@@ -1,3 +1,5 @@
+import pytest
+
 from modules.improve.recommend.dedup import (
     EMBEDDING_THRESHOLD,
     PriorRecommendation,
@@ -27,11 +29,31 @@ def test_a_reordered_title_is_caught():
     assert verdict.method == "normalized title"
 
 
-def test_the_rejection_reason_travels_with_the_verdict():
-    """It has to reach the prompt that generates the next round."""
+def test_the_verdict_says_what_is_outstanding():
+    """The status matters more than the fact of duplication: "already accepted
+    and waiting to be built" is a different thing to hear."""
     reason = check("Library semantic search", "...", [REJECTED]).reason
-    assert "rejected because" in reason
+
+    assert "already rejected" in reason
     assert "product maturity" in reason
+
+
+@pytest.mark.parametrize(
+    "status,expected",
+    [
+        ("recommended", "awaiting your decision"),
+        ("accepted", "awaiting implementation"),
+        ("implemented", "already implemented"),
+        ("awaiting review", "awaiting review"),
+        ("abandoned", "then abandoned"),
+    ],
+)
+def test_each_state_reads_as_what_is_outstanding(status, expected):
+    prior = PriorRecommendation(
+        id=7, title="Semantic library search",
+        normalized_title="library search semantic", status=status, body="x",
+    )
+    assert expected in check("Library semantic search", "...", [prior]).reason
 
 
 def test_a_reworded_title_is_caught_by_title_overlap():

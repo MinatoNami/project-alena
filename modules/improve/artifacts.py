@@ -9,6 +9,7 @@ repository by default -- the spec's `alena-intelligence/` layout, rooted at
 from __future__ import annotations
 
 import os
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -163,3 +164,44 @@ def utcnow() -> str:
     same second.
     """
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+
+
+RESEARCH_SLUG = re.compile(r"[^a-z0-9]+")
+
+
+def research_dir(repository_id: str, root: Optional[Path] = None) -> Path:
+    path = (root or intelligence_dir()) / "research" / repository_id
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def write_research(
+    repository_id: str,
+    content: str,
+    *,
+    document_date: Optional[str] = None,
+    title: Optional[str] = None,
+    root: Optional[Path] = None,
+) -> Path:
+    """Save a research document where the spec puts it, and where a human
+    can open it.
+
+    The database holds the content already, but a database row is not
+    something you read on a Sunday. This is the copy you can open, diff, and
+    keep after the database is thrown away.
+
+    Named by the date it covers rather than the date it was ingested, so a
+    report fetched late files itself under the week it is about. A second
+    document on the same date gets its title appended rather than overwriting
+    the first.
+    """
+    directory = research_dir(repository_id, root)
+    stem = (document_date or utcnow()[:10]).strip()[:10] or "undated"
+
+    path = directory / f"{stem}.md"
+    if path.exists() and path.read_text() != content:
+        slug = RESEARCH_SLUG.sub("-", (title or "report").lower()).strip("-")[:40]
+        path = directory / f"{stem}-{slug or 'report'}.md"
+
+    path.write_text(content)
+    return path

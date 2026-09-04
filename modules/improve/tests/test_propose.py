@@ -88,7 +88,7 @@ def test_a_proposal_is_de_duplicated_like_anything_else(repository):
     again = propose(repository, "On disk, cache page thumbnails", "Same.", use_embeddings=False)
 
     assert again.duplicate
-    assert "duplicate of observation" in again.duplicate_reason
+    assert "awaiting review" in again.duplicate_reason
 
 
 def test_a_proposal_duplicating_a_rejected_recommendation_is_caught(repository):

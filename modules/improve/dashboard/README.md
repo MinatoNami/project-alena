@@ -133,6 +133,7 @@ not be choosing one.
 | Repositories | Profile, summary, languages, recommendation history |
 | Portfolio | Divergent pins, shared dependencies, work that might travel |
 | History | Every scan, ingest, review, decision and implementation, by day |
+| Research | Every document, expandable, with what came out of it |
 | Propose | An idea of your own, entering where research does |
 | Tools | Effectiveness from the audit log |
 

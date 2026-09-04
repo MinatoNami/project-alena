@@ -216,7 +216,66 @@ framing.
 It works. Asked about a real proposal, Codex answered *"Rejected. The
 observation's premise is false"* and cited the four files showing why.
 
-### Steering a run
+### One cycle, stopping at the gate
+
+```bash
+scripts/alena_improve.sh cycle --all
+```
+
+Scan, ingest whatever research has been dropped, review what is new, score it
+— then stop. Those four are always run in that order and are useless out of
+it, so running them as one thing removes an ordering nobody should have to
+remember.
+
+**It never implements.** Everything a cycle does is reading, thinking, and
+writing to ALENA's own state. The first thing that touches a repository is
+behind a recorded human decision, and putting it on the end of a command that
+also refreshes scans would be a way around that.
+
+Research is read from `~/alena-research/<repository-id>/`, one directory per
+repository, so a document cannot be attributed to the wrong repository by
+sitting in the wrong place. `ALENA_RESEARCH_DIR` moves the drop point.
+
+### Nothing outstanding is raised twice
+
+De-duplication at ingest compares against every recommendation in any state
+and every observation still awaiting review, so an idea that is already
+accepted and waiting to be built is skipped rather than added again. What it
+reports is *what is outstanding*, because that is what you act on:
+
+```
+already accepted and awaiting implementation [recommendation #4, matched on …]
+already proposed and awaiting your decision  [recommendation #7, matched on …]
+already rejected — not this quarter          [recommendation #2, matched on …]
+```
+
+The reviewer is a second line for the same thing: it is handed the rejected
+list and asked whether the observation restates one. On a real run it
+answered *"This is not a restatement of either previously rejected
+proposal"* — which is the layer that covers for a missing embedding model.
+
+## Reading the research
+
+```bash
+scripts/alena_improve.sh research              # what is on record
+scripts/alena_improve.sh research --id 3       # one document in full
+```
+
+Every document is also written to
+`alena-intelligence/research/<repository-id>/<date>.md` — named for the date
+it covers rather than the date it was ingested, so a report fetched late
+files itself under the week it is about. The database has the content too,
+but a database row is not something you read on a Sunday.
+
+The dashboard has a page for it: each document expands to show the markdown,
+the file it was written to, and the observations that came out of it.
+Rendering is deliberately not a markdown-to-HTML library — research is
+written by an external agent reading the public internet, and handing it to
+something that emits HTML would put attacker-authored markup in the
+dashboard. Text is rendered through Vue's interpolation, which escapes it,
+and only `http`/`https` URLs become links.
+
+## Steering a run
 
 A manual scan or review takes a free-text steer — from the dashboard, or
 `--focus` on the CLI:

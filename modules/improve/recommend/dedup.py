@@ -37,6 +37,19 @@ from ..text import jaccard, normalize_title
 
 # Tuned to be cautious: a false "duplicate" silently loses a real idea, which
 # is worse than a duplicate reaching a human who can see it is one.
+# How each status reads when something duplicates it. Phrased as what is
+# outstanding, because that is what the reader has to act on.
+_WHERE = {
+    "awaiting review": "already proposed and awaiting review",
+    "recommended": "already proposed and awaiting your decision",
+    "accepted": "already accepted and awaiting implementation",
+    "implemented": "already implemented",
+    "rejected": "already rejected",
+    "abandoned": "already proposed and then abandoned",
+    "successful": "already implemented, and it worked",
+    "unsuccessful": "already implemented, and it did not work",
+}
+
 TITLE_MATCH = 1.0
 # Titles are short and on-topic, so their overlap is a sharper signal than the
 # same measure over full text, where a long shared preamble drowns it. Hence a
@@ -96,16 +109,25 @@ class DedupVerdict:
 
     @property
     def reason(self) -> Optional[str]:
+        """Why this was skipped, in terms of what is already in flight.
+
+        The status matters more than the fact of duplication. "Already
+        accepted and waiting to be built" is a different thing to hear than
+        "you turned this down in March", and the point of not re-adding
+        something is that the existing one gets dealt with -- which needs the
+        reader to know which one, and where it has got to.
+        """
         if not self.duplicate or self.matched is None:
             return None
-        base = (
-            f"duplicate of {self.matched.kind} #{self.matched.id} "
-            f"({self.matched.status}) by {self.method}, "
-            f"similarity {self.similarity:.2f}"
+
+        where = _WHERE.get(self.matched.status, f"already recorded as {self.matched.status}")
+        detail = (
+            f"{self.matched.kind} #{self.matched.id}, matched on "
+            f"{self.method} ({self.similarity:.2f})"
         )
         if self.matched.status == "rejected" and self.matched.reason:
-            return f"{base}; rejected because: {self.matched.reason}"
-        return base
+            return f"{where} — {self.matched.reason} [{detail}]"
+        return f"{where} [{detail}]"
 
 
 def check(

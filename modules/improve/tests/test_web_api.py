@@ -320,7 +320,7 @@ def test_proposing_the_same_thing_twice_says_so(client):
     second = client.post("/api/observations", json=payload, headers=DASHBOARD).json()
 
     assert second["duplicate"]
-    assert "duplicate" in second["duplicate_reason"]
+    assert "already proposed" in second["duplicate_reason"]
 
 
 def test_proposing_needs_the_dashboard_header(client):
@@ -392,3 +392,64 @@ def test_history_for_an_unknown_repository_is_a_404(client):
 def test_history_needs_no_dashboard_header(client):
     """It only reads."""
     assert client.get("/api/history").status_code == 200
+
+
+# -- research on record ----------------------------------------------------
+
+
+def test_research_lists_without_the_bodies(client, repository):
+    from modules.improve.research import ingest_text
+
+    ingest_text(
+        repository,
+        "# R\n\nRepository: sample\nSource: chatgpt-work\n\n## Found\n\nDetail.\n",
+        use_embeddings=False,
+    )
+
+    rows = client.get("/api/research").json()
+    assert len(rows) == 1
+    assert "content" not in rows[0], "a list should not carry every body"
+    assert rows[0]["observation_count"] == 1
+    assert rows[0]["size"] > 0
+
+
+def test_one_research_document_carries_its_content_and_outcome(client, repository):
+    from modules.improve.research import ingest_text
+
+    ingest_text(
+        repository,
+        "# R\n\nRepository: sample\nSource: chatgpt-work\n\n## Found\n\nDetail.\n",
+        use_embeddings=False,
+    )
+    research_id = client.get("/api/research").json()[0]["id"]
+
+    document = client.get(f"/api/research/{research_id}").json()
+    assert "Detail." in document["content"]
+    assert [o["title"] for o in document["observations"]] == ["Found"]
+
+
+def test_a_research_document_is_saved_as_a_file(client, repository, tmp_path):
+    from modules.improve.research import ingest_text
+
+    ingest_text(
+        repository,
+        "# R\n\nRepository: sample\nDate: 2026-09-04\nSource: chatgpt-work\n\n## Found\n\nDetail.\n",
+        use_embeddings=False,
+    )
+
+    path = client.get("/api/research").json()[0]["path"]
+    assert path and path.endswith("2026-09-04.md")
+    assert "Detail." in open(path).read()
+
+
+def test_an_unknown_research_document_is_a_404(client):
+    assert client.get("/api/research/999").status_code == 404
+
+
+def test_research_can_be_filtered_by_repository(client, repository):
+    from modules.improve.research import propose
+
+    propose(repository, "An idea", "Detail.", use_embeddings=False)
+
+    assert client.get("/api/research?repository_id=sample").json()
+    assert client.get("/api/research?repository_id=nope").status_code == 404

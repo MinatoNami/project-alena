@@ -381,3 +381,38 @@ def test_history_can_be_filtered(registry_file, repository, capsys):
 
     assert run("history", "--kind", "review", "--registry", registry_file) == 0
     assert "Nothing has happened yet" in capsys.readouterr().out
+
+
+def test_cycle_stops_at_the_gate(registry_file, repo, capsys, tmp_path, monkeypatch):
+    monkeypatch.setenv("ALENA_RESEARCH_DIR", str(tmp_path / "empty"))
+
+    assert run("cycle", "sample", "--no-llm", "--registry", registry_file) == 0
+    out = capsys.readouterr().out
+    assert "Nothing has been changed in any repository" in out
+
+
+def test_research_lists_what_is_on_record(registry_file, repository, capsys):
+    from modules.improve.research import propose
+
+    propose(repository, "An idea of mine", "Detail.", use_embeddings=False)
+
+    assert run("research", "--registry", registry_file) == 0
+    out = capsys.readouterr().out
+    assert "An idea of mine" in out
+    assert "operator" in out
+
+
+def test_research_prints_one_in_full(registry_file, repository, capsys):
+    from modules.improve.persistence import research_documents
+    from modules.improve.research import propose
+
+    propose(repository, "An idea of mine", "The detail of it.", use_embeddings=False)
+    research_id = research_documents("sample")[0]["id"]
+
+    assert run("research", "--id", str(research_id), "--registry", registry_file) == 0
+    assert "The detail of it." in capsys.readouterr().out
+
+
+def test_research_with_nothing_on_record(registry_file, capsys):
+    assert run("research", "--registry", registry_file) == 0
+    assert "No research on record" in capsys.readouterr().out

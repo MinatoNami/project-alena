@@ -677,3 +677,51 @@ def implementations_for(
             (recommendation_id,),
         )
     ]
+
+
+def research_documents(
+    repository_id: Optional[str] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> List[Dict[str, Any]]:
+    """Research on record, newest first, without the bodies.
+
+    The content is often thousands of words; a list of them should not carry
+    every one.
+    """
+    conn = conn or get_connection()
+    sql = (
+        "SELECT id, repository_id, created_at, source, title, document_date,"
+        " path, LENGTH(content) AS size,"
+        " (SELECT COUNT(*) FROM observations o WHERE o.research_id = r.id)"
+        "   AS observation_count"
+        " FROM research_documents r"
+    )
+    params: tuple = ()
+    if repository_id:
+        sql += " WHERE repository_id = ?"
+        params = (repository_id,)
+    sql += " ORDER BY id DESC"
+    return [dict(row) for row in conn.execute(sql, params)]
+
+
+def research_document(
+    research_id: int, conn: Optional[sqlite3.Connection] = None
+) -> Optional[Dict[str, Any]]:
+    """One research document, with its content and what came out of it."""
+    conn = conn or get_connection()
+    row = conn.execute(
+        "SELECT * FROM research_documents WHERE id = ?", (research_id,)
+    ).fetchone()
+    if row is None:
+        return None
+
+    document = dict(row)
+    document["observations"] = [
+        dict(o)
+        for o in conn.execute(
+            "SELECT id, title, duplicate_reason FROM observations"
+            " WHERE research_id = ? ORDER BY id",
+            (research_id,),
+        )
+    ]
+    return document

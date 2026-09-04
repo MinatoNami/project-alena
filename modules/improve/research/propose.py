@@ -24,6 +24,7 @@ from typing import Optional
 from modules.core.controller.logger import logger
 
 from ..agents.prompting import OPERATOR_SOURCE
+from ..artifacts import write_research
 from ..persistence import (
     priors_for_dedup,
     record_observation,
@@ -90,12 +91,14 @@ def propose(
     # every other observation has: a source, a date, and something to point at
     # when asking where an idea came from.
     document = f"# Proposal: {title}\n\nRepository: {repository.id}\nSource: {OPERATOR_SOURCE}\n\n## {title}\n\n{body}\n"
+    saved = write_research(repository.id, document, title=title)
     research_id, _ = record_research(
         repository_id=repository.id,
         source=OPERATOR_SOURCE,
         content=document,
         content_hash=content_hash(document),
         title=title,
+        path=str(saved),
         conn=conn,
     )
 

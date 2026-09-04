@@ -17,6 +17,7 @@ from typing import List, Optional
 
 from modules.core.controller.logger import logger
 
+from ..artifacts import write_research
 from ..persistence import (
     priors_for_dedup,
     record_observation,
@@ -83,6 +84,15 @@ def ingest_text(
             ),
         )
 
+    # Saved where a human can open it, not only where the system can query
+    # it. `path` is the drop location it arrived from; the stored path is the
+    # copy under alena-intelligence, which outlives the download.
+    saved = write_research(
+        repository.id,
+        parsed.content,
+        document_date=parsed.document_date,
+        title=parsed.title,
+    )
     research_id, created = record_research(
         repository_id=repository.id,
         source=parsed.source or source,
@@ -90,7 +100,7 @@ def ingest_text(
         content_hash=parsed.content_hash,
         title=parsed.title,
         document_date=parsed.document_date,
-        path=path,
+        path=str(saved),
         conn=conn,
     )
 
