@@ -108,6 +108,11 @@ class ToolGateway:
         return self._catalog
 
     @property
+    def audit(self) -> AuditLog:
+        """The audit log, for a caller that refuses before reaching `call`."""
+        return self._audit
+
+    @property
     def grants(self) -> GrantBook:
         """Write grants currently in force. Empty is the normal state."""
         return self._grants

@@ -115,3 +115,31 @@ def test_a_discovered_tool_survives_the_capability_gate(wired):
     assert agent._tool_can_handle("repo.search", {"edit_files"})
     assert not agent._tool_can_handle("google_list_events", {"edit_files"})
     assert not agent._tool_can_handle("not_a_tool", {"edit_files"})
+
+
+def test_a_capability_refusal_is_recorded_like_any_other_denial(wired):
+    """The heuristic used to be the one refusal nothing counted.
+
+    Every gateway denial lands in the audit log with a reason code, which is
+    what `alena-improve tools` reads. This one sits in front of the gateway
+    and refused silently, so whether it has ever prevented a real mistake was
+    unanswerable.
+    """
+    from modules.gateway import get_gateway
+
+    assert not agent._tool_can_handle(
+        "google_list_events", {"edit_files"}, {"calendar_id": "primary"}
+    )
+
+    row = get_gateway().audit.recent(limit=1)[0]
+    assert row["tool"] == "google_list_events"
+    assert row["outcome"] == "denied"
+    assert row["denial_reason"] == "capability_heuristic:edit_files"
+
+
+def test_an_allowed_tool_records_nothing(wired):
+    from modules.gateway import get_gateway
+
+    assert agent._tool_can_handle("repo.search", {"edit_files"})
+
+    assert get_gateway().audit.recent(limit=1) == []

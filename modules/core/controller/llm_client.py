@@ -92,7 +92,18 @@ def _config() -> LLMConfig:
 _client = LLMChatClient(_config())
 
 
-def ask_llm(messages: List[Dict[str, Any]], *, agent: str = "assistant") -> str:
+NO_TOOLS_SECTION = (
+    "No tools are available for this reply. Answer from the tool results "
+    "already in the conversation, and say plainly what you could not determine."
+)
+
+
+def ask_llm(
+    messages: List[Dict[str, Any]],
+    *,
+    agent: str = "assistant",
+    with_tools: bool = True,
+) -> str:
     """Ask the planner. Returns prose, or tool-call JSON for the agent loop.
 
     Tool calls now go through the server's native tool-calling interface, so
@@ -104,8 +115,15 @@ def ask_llm(messages: List[Dict[str, Any]], *, agent: str = "assistant") -> str:
     one the call is later made under. Offering the planner a tool the gateway
     then refuses is worse than not offering it: the model spends a turn on it
     and reads the refusal as a failure to retry.
+
+    `with_tools=False` asks for prose and nothing else. The agent loop uses it
+    to spend its last step on an answer rather than on another tool call it has
+    no budget to run.
     """
-    tools, tools_section = planner_tools(agent)
+    if with_tools:
+        tools, tools_section = planner_tools(agent)
+    else:
+        tools, tools_section = [], NO_TOOLS_SECTION
     try:
         response = _client.chat(
             messages,

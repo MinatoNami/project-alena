@@ -71,7 +71,30 @@ def _get_server_for_tool(tool_name: str) -> SimpleNamespace:
     return _build_server_config(server_key)
 
 
-def _tool_can_handle(tool_name: str, intents: Set[str]) -> bool:
+def _record_gate_refusal(tool_name: str, arguments: dict, intents: Set[str]) -> None:
+    """Record the one refusal the audit trail never saw.
+
+    Every gateway denial is recorded with a reason code, counted, and reported
+    by `alena-improve tools`. This heuristic sits in front of the gateway and
+    refused silently, so there has never been a way to ask the obvious
+    question: does it prevent mistakes, or only cause them? Recorded as a
+    denial with its own reason so that the existing metrics can answer it.
+    """
+    try:
+        get_gateway().audit.record(
+            tool=tool_name,
+            agent="assistant",
+            outcome="denied",
+            arguments=arguments,
+            denial_reason=f"capability_heuristic:{','.join(sorted(intents)) or 'none'}",
+        )
+    except Exception as exc:  # noqa: BLE001 - never fail a turn over bookkeeping
+        logger.warning(f"Could not record a capability refusal: {exc!r}")
+
+
+def _tool_can_handle(
+    tool_name: str, intents: Set[str], arguments: Optional[dict] = None
+) -> bool:
     """Whether `tool_name` could satisfy the turn's inferred intents.
 
     The capability table describes the static tools and only those. A
@@ -84,8 +107,13 @@ def _tool_can_handle(tool_name: str, intents: Set[str]) -> bool:
     a code generator, and it can only judge the tools it actually describes.
     """
     if tool_name in TOOL_CAPABILITIES:
-        return tool_can_handle(tool_name, intents)
-    return _catalog_entry(tool_name) is not None
+        allowed = tool_can_handle(tool_name, intents)
+    else:
+        allowed = _catalog_entry(tool_name) is not None
+
+    if not allowed:
+        _record_gate_refusal(tool_name, arguments or {}, intents)
+    return allowed
 
 
 async def _discover_tools() -> None:
@@ -256,7 +284,9 @@ async def _plan_and_act(
             logger.info(f"TOOL_REQUEST (fallback): tool={tool} arguments={arguments}")
 
             intents = infer_intents(user_input)
-            if not explicit_codex_request and not tool_can_handle(tool, intents):
+            if not explicit_codex_request and not _tool_can_handle(
+                tool, intents, arguments
+            ):
                 logger.warning(f"Tool '{tool}' cannot satisfy intents {intents}")
                 emit(
                     "❌ I cannot complete this request with the available tools.\n"
@@ -288,7 +318,9 @@ async def _plan_and_act(
             if "access_filesystem" in intents:
                 tool = "codex_analyze"
                 arguments = {"repo_path": ".", "question": user_input}
-                if not explicit_codex_request and not tool_can_handle(tool, intents):
+                if not explicit_codex_request and not _tool_can_handle(
+                    tool, intents, arguments
+                ):
                     logger.warning(f"Tool '{tool}' cannot satisfy intents {intents}")
                     emit(
                         "❌ I cannot complete this request with the available tools.\n"
@@ -386,7 +418,9 @@ async def _plan_and_act(
                             f"Preprocessed {key}: replaced 'Z' with {timezone_offset}"
                         )
 
-        if not explicit_codex_request and not _tool_can_handle(tool, intents):
+        if not explicit_codex_request and not _tool_can_handle(
+            tool, intents, arguments
+        ):
             logger.warning(f"Tool '{tool}' cannot satisfy intents {intents}")
             emit(
                 "❌ I cannot complete this request with the available tools.\n"
@@ -442,13 +476,52 @@ async def _plan_and_act(
 
         tool_steps += 1
         if tool_steps >= max_tool_steps:
-            emit("❌ Reached tool step limit. Please refine the request or try again.")
+            # Ending the turn here used to throw away the result of the call
+            # that tripped the limit, and answer an error. The budget is on
+            # tool calls, not on the turn -- so spend the last step asking for
+            # prose instead, and let the model say what it could not finish.
+            try:
+                final_message = ask_llm(
+                    [
+                        *memory.get_messages(),
+                        {
+                            "role": "user",
+                            "content": (
+                                "No more tool calls are available for this "
+                                "turn. Answer now from the tool results above."
+                            ),
+                        },
+                    ],
+                    with_tools=False,
+                )
+            except LLMUnavailable as exc:
+                emit(f"❌ Inference server unavailable: {exc}")
+                return done()
+
+            if not final_message.strip():
+                # Emit-only, like the other failure paths: an empty string is
+                # not an answer to hand back to a caller.
+                final_message = None
+                emit(
+                    "❌ Reached tool step limit. "
+                    "Please refine the request or try again."
+                )
+                return done()
+
+            memory.add_assistant(final_message)
+            emit("\n✅ Final answer:\n" + final_message)
             return done()
 
+        # Asking for "a tool call JSON" here contradicts the system prompt,
+        # which tells the model to use the tool-calling interface. Given both,
+        # a model splits the difference and writes prose that *describes* a
+        # call -- which parses as an answer, so the chain ends one step short
+        # of the thing the user asked for.
         followup = (
-            "Use the tool result above to continue. "
-            "If another tool call is required, respond with a tool call JSON. "
-            "Otherwise, provide the final answer."
+            "Use the tool result above to continue. If you need another tool, "
+            "call it through the tool interface. Otherwise give the final "
+            "answer. Do not describe a tool call in your reply: either make "
+            "the call or answer."
         )
         try:
             current_response = ask_llm(
