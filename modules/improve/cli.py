@@ -201,13 +201,23 @@ def cmd_ingest_research(args: argparse.Namespace) -> int:
 
 
 def cmd_review(args: argparse.Namespace) -> int:
+    from .agents.roster import REVIEW, RosterError, load
+
     registry = load_registry(args.registry)
     install_gateway(registry, args.policy)
     ensure_layout()
 
+    agent = args.agent
+    if agent is None:
+        try:
+            agent = load().agent_for(REVIEW)
+        except RosterError as exc:
+            print(f"The agent configuration cannot be used: {exc}")
+            return 1
+
     failed = 0
     for repository in _targets(registry, args.repository, args.all):
-        if args.agent == "claude":
+        if agent == "claude":
             run = escalate_repository(
                 repository,
                 limit=args.limit,
@@ -470,6 +480,110 @@ def cmd_tools(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_investigate(args: argparse.Namespace) -> int:
+    """Let the local model look at a repository and propose what it notices."""
+    import asyncio
+
+    from .agents.local_research import investigate
+    from modules.gateway.pool import close_pool
+
+    registry = load_registry(args.registry)
+    install_gateway(registry, args.policy)
+    ensure_layout()
+
+    async def run_all():
+        runs = []
+        try:
+            for repository in _targets(registry, args.repository, args.all):
+                runs.append(
+                    await investigate(
+                        repository,
+                        note=args.focus,
+                        **{
+                            key: value
+                            for key, value in (
+                                ("max_steps", args.max_steps),
+                                ("max_candidates", args.max_candidates),
+                            )
+                            if value is not None
+                        },
+                    )
+                )
+        finally:
+            await close_pool()
+        return runs
+
+    runs = asyncio.run(run_all())
+
+    for run in runs:
+        print(f"  {run.describe()}")
+        for title in run.proposed:
+            print(f"    proposed: {title}")
+        for title in run.duplicates:
+            print(f"    already outstanding: {title}")
+        for title in run.withdrawn:
+            print(f"    withdrawn, already decided: {title}")
+        if run.unparsed:
+            print(f"    its final reply was not JSON: {run.unparsed[:120]}")
+
+    proposed = sum(len(r.proposed) for r in runs)
+    print()
+    if proposed:
+        print(
+            f"{proposed} observation(s) recorded. They are reviewed like any "
+            "other, and nothing is built without your decision."
+        )
+    else:
+        print("Nothing new proposed.")
+    return 1 if any(r.errors for r in runs) else 0
+
+
+def cmd_agents(args: argparse.Namespace) -> int:
+    """Who does which segment, and what every other combination would need."""
+    from .agents.roster import (
+        AGENTS,
+        SEGMENTS,
+        RosterError,
+        config_path,
+        load,
+    )
+
+    try:
+        assignment = load(args.config)
+    except RosterError as exc:
+        print(f"The agent configuration cannot be used: {exc}")
+        return 1
+
+    path = config_path(args.config)
+    print(f"Configured in {path}" if path.exists() else f"No {path}; using defaults")
+    print()
+
+    for segment in SEGMENTS:
+        agent_name = assignment.agent_for(segment)
+        agent = AGENTS[agent_name]
+        print(f"  {segment:9} {agent_name:14} {agent.description}")
+    print()
+
+    if not args.matrix:
+        print("`alena-improve agents --matrix` shows what else is available.")
+        return 0
+
+    print("What each agent can do, and what the rest would need:")
+    print()
+    for name, agent in sorted(AGENTS.items()):
+        print(f"  {name} ({agent.reach}) -- {agent.description}")
+        for segment in SEGMENTS:
+            if agent.can(segment):
+                mark = "yes"
+                reason = "wired"
+            else:
+                mark = "no "
+                reason = agent.why_not(segment)
+            print(f"    {mark}  {segment:9} {reason}")
+        print()
+    return 0
+
+
 def cmd_check_routine(args: argparse.Namespace) -> int:
     """Ask the Claude routine one trivial question."""
     from .agents.claude_review import check_routine
@@ -702,7 +816,7 @@ def cmd_history(args: argparse.Namespace) -> int:
 
 
 def cmd_cycle(args: argparse.Namespace) -> int:
-    """Scan, ingest research, review and score — stopping at the gate."""
+    """Scan, ingest research, review, score, refresh — stopping at the gate."""
     registry = load_registry(args.registry)
     install_gateway(registry, args.policy)
     ensure_layout()
@@ -720,6 +834,11 @@ def cmd_cycle(args: argparse.Namespace) -> int:
         print(f"  {entry.describe()}")
         for title in entry.duplicates:
             print(f"    already outstanding: {title}")
+
+    if run.portfolio_error:
+        print(f"  portfolio refresh failed: {run.portfolio_error}")
+    elif run.portfolio:
+        print(f"  portfolio refreshed: {len(run.portfolio)} file(s)")
 
     print()
     if run.awaiting_decision:
@@ -846,9 +965,11 @@ def build_parser() -> argparse.ArgumentParser:
     review.add_argument(
         "--agent",
         choices=("codex", "claude"),
-        default="codex",
+        # None means "whatever config/agents.yaml assigns to review", so the
+        # flag stays an override for one run rather than the only way to say it.
+        default=None,
         help="codex reviews everything new; claude only what clears the "
-        "escalation thresholds",
+        "escalation thresholds. Defaults to the review agent in agents.yaml",
     )
     review.add_argument(
         "--dry-run",
@@ -940,6 +1061,39 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip starting the MCP servers to enumerate their tools",
     )
     tools.set_defaults(func=cmd_tools)
+
+    investigate_cmd = sub.add_parser(
+        "investigate",
+        parents=[common],
+        help="Let the local model research a repository and propose findings",
+    )
+    investigate_cmd.add_argument("repository", nargs="?")
+    investigate_cmd.add_argument("--all", action="store_true")
+    investigate_cmd.add_argument("--focus", help="A steer for this run")
+    # Defaults come from the agent, not from a second copy here that drifts.
+    investigate_cmd.add_argument(
+        "--max-steps",
+        type=int,
+        default=None,
+        help="Tool calls before it must write up",
+    )
+    investigate_cmd.add_argument(
+        "--max-candidates", type=int, default=None, help="Proposals to keep"
+    )
+    investigate_cmd.set_defaults(func=cmd_investigate)
+
+    agents_cmd = sub.add_parser(
+        "agents",
+        parents=[common],
+        help="Which agent does which segment of the loop",
+    )
+    agents_cmd.add_argument("--config", help="Path to agents.yaml")
+    agents_cmd.add_argument(
+        "--matrix",
+        action="store_true",
+        help="Every agent and segment, with the reason for each gap",
+    )
+    agents_cmd.set_defaults(func=cmd_agents)
 
     check = sub.add_parser(
         "check-routine",

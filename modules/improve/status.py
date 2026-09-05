@@ -33,7 +33,9 @@ STALE_DAYS = {
     "unresolved": 30,      # implemented, but no outcome recorded
 }
 
-LAUNCHD_JOBS = ("local.alena.scan", "local.alena.review", "local.alena.recommend")
+# The timed jobs `status` reports on. One, since the pass became a single
+# nightly cycle; the dashboard is a service and reports its own health.
+LAUNCHD_JOBS = ("local.alena.cycle",)
 
 
 def _age_days(timestamp: Optional[str]) -> Optional[int]:

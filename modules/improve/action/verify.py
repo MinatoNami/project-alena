@@ -39,10 +39,36 @@ class TestResult:
         return f"tests {'passed' if self.passed else 'FAILED'} ({self.command}{where})"
 
 
+def _pytest_command(workspace: Path, directory: str) -> str:
+    """`pytest`, from the project's own virtualenv when it has one.
+
+    A bare `pytest` is only on PATH if the venv happens to be activated, and
+    launchd activates nothing. This repository's own runner lives in
+    `.venv/bin/pytest`, so the action agent's verification step reported "test
+    runner not found" while the implementing agent, which looked, ran the same
+    suite successfully.
+
+    Deliberately not `sys.executable -m pytest`: that is *ALENA's* interpreter,
+    and running it against another repository's tests would use ALENA's
+    installed packages rather than the ones under test. Better to report that
+    no runner was found than to run the wrong one.
+    """
+    root = workspace / directory if directory else workspace
+    for candidate in (".venv/bin/pytest", "venv/bin/pytest", ".venv/Scripts/pytest.exe"):
+        runner = root / candidate
+        if runner.exists():
+            return f"{shlex.quote(str(runner))} -q"
+        # A monorepo subproject often shares the repository root's virtualenv.
+        shared = workspace / candidate
+        if directory and shared.exists():
+            return f"{shlex.quote(str(shared))} -q"
+    return "pytest -q"
+
+
 def _command_for(workspace: Path, directory: str, names: set) -> Optional[str]:
     """How the project rooted at `directory` runs its tests, if it says."""
     if {"pytest.ini", "conftest.py", "pyproject.toml", "setup.cfg"} & names:
-        return "pytest -q"
+        return _pytest_command(workspace, directory)
     if "package.json" in names:
         try:
             manifest = json.loads(
@@ -188,6 +214,25 @@ End with a fenced JSON block and nothing after it:
 ```json
 {{"verdict": "supported | rejected | unclear", "summary": "one sentence"}}
 ```"""
+
+
+def reviewer_unavailable(agent: str) -> Optional[str]:
+    """Why `agent` cannot review right now, or None if it can.
+
+    Checked before the implementation starts. Finding out afterwards means an
+    unattended run has already spent an implementation to discover that the
+    second half of "one model writes, the other checks" was never going to
+    happen -- and the discovery arrives as a warning in a log nobody reads.
+    """
+    if agent != "claude":
+        return None
+    from ..agents.claude_review import RoutineConfig, RoutineNotConfigured
+
+    try:
+        RoutineConfig.from_env()
+    except RoutineNotConfigured as exc:
+        return str(exc)
+    return None
 
 
 def review_diff(

@@ -49,9 +49,13 @@ loopback, that stops being true and it needs one.
 
 ## Running a step
 
-The status page has a button per pipeline step: scan, review, recommend, a
-Claude escalation preview, and a portfolio refresh. Output streams back into
-the page.
+The status page has a button for the whole nightly pass — **Run a cycle** —
+and one per individual step: scan, review, recommend, a Claude escalation
+preview, and a portfolio refresh. Output streams back into the page.
+
+"Run a cycle" is the same command the nightly job runs, so re-running a night
+by hand is one button rather than four in the right order. The individual
+steps are for when you know which one you want.
 
 Each one starts a **subprocess running the same wrapper launchd runs**, so a
 button and a timer take an identical path — including the PATH fixes and the

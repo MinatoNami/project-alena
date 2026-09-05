@@ -40,6 +40,12 @@ onMounted(() => {
 
       <section class="mb-8">
         <h2 class="mb-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Pipeline</h2>
+        <details class="mb-3 rounded border border-neutral-200 dark:border-neutral-800">
+          <summary class="cursor-pointer px-4 py-2 text-xs text-neutral-500">How a night runs</summary>
+          <div class="border-t border-neutral-200 px-4 py-3 dark:border-neutral-800">
+            <PipelineDiagram :stages="data.stages" />
+          </div>
+        </details>
         <ul class="divide-y divide-neutral-200 rounded border border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
           <li
             v-for="stage in data.stages"

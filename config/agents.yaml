@@ -1,0 +1,37 @@
+# Which agent does which segment of the improvement loop.
+#
+# Delete this file and the defaults below are exactly what runs, which is what
+# ran before any of it was configurable.
+#
+# A segment naming an agent that cannot actually do it is refused when this
+# file is read, with the reason -- rather than at 02:00 with nobody watching.
+# `alena-improve agents` prints the whole matrix, including the reason for
+# every combination that is not available yet.
+#
+#   scan      read the repository and describe what it is
+#   research  turn a repository into observations worth reviewing
+#   review    judge an observation and score it
+#   action    implement an accepted recommendation on a branch
+#
+# Two things are structural rather than unfinished, and no amount of wiring
+# changes them:
+#
+#   * `action` needs a local write path. An agent reached over HTTP can read a
+#     diff and judge it; it cannot commit to a checkout on this machine.
+#   * `chatgpt-work` is a source label on a document somebody dropped in the
+#     research directory, not something ALENA can call. It has no endpoint.
+
+version: 1
+
+segments:
+  scan: local
+
+  # `chatgpt-work` waits for a document to be dropped in the research
+  # directory. `local` makes ALENA investigate the repository itself, with the
+  # read-only alena-core tools, as part of the nightly pass -- see
+  # `alena-improve investigate`. Both can feed the same pipeline; this picks
+  # what the *cycle* does unattended.
+  research: chatgpt-work
+
+  review: codex
+  action: codex

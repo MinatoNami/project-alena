@@ -201,6 +201,26 @@ def test_a_todo_that_only_moved_is_not_reported_as_churn():
     assert delta["resolved"] == []
 
 
+def test_the_diff_tolerates_an_invalid_previous_line():
+    previous = [
+        {"path": "a.py", "line": "unknown", "marker": "TODO", "text": "same"}
+    ]
+    current = parse_grep(["a.py:42:# TODO: same"])
+
+    delta = diff_todos(current, previous)
+
+    assert delta == {"added": [], "resolved": []}
+
+
+def test_the_diff_skips_malformed_previous_todos():
+    previous = [None, {"path": "a.py", "line": 1, "marker": "TODO"}]
+    current = parse_grep(["b.py:2:# TODO: new"])
+
+    delta = diff_todos(current, previous)
+
+    assert delta == {"added": [current[0].to_dict()], "resolved": []}
+
+
 # -- manifests found in real repositories ----------------------------------
 
 

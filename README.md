@@ -16,6 +16,7 @@ call. Nothing leaves the machine unless you configure something that does.
 
 - [What it does](#what-it-does)
 - [Architecture](#architecture)
+- [How the improvement loop works](#how-the-improvement-loop-works)
 - [Repository layout](#repository-layout)
 - [Tools](#tools)
 - [Requirements](#requirements)
@@ -81,6 +82,56 @@ logs the attempt, and only then calls it.
 
 ---
 
+## How the improvement loop works
+
+One pass a night, in order, stopping where a person is needed:
+
+```mermaid
+flowchart LR
+    subgraph nightly["alena-improve cycle — nightly 02:00, automatic"]
+        direction LR
+        S[scan] --> I[ingest research] --> R[review] --> C[score] --> P[refresh portfolio]
+    end
+    P --> G{{"you decide"}}
+    G -->|accept| A[action agent<br/>writes a branch]
+    G -->|reject| X([recorded, with a reason])
+    A --> O([outcome recorded])
+
+    style G stroke-width:3px
+```
+
+Everything left of the gate reads, thinks and writes to ALENA's own state.
+Nothing there touches a repository. The action agent is the only thing that
+does, and it never runs without a recorded acceptance behind it — see
+[modules/improve](modules/improve/README.md).
+
+A recommendation moves through these states, and only these transitions are
+legal — `modules/improve/decide.py` rejects anything else:
+
+```mermaid
+stateDiagram-v2
+    [*] --> recommended: scored
+    recommended --> accepted: you accept
+    recommended --> rejected: you reject
+    rejected --> recommended: proposed again
+    accepted --> implemented: branch written
+    accepted --> rejected: reconsidered
+    accepted --> abandoned: dropped
+    implemented --> successful: it worked
+    implemented --> unsuccessful: it did not
+    implemented --> abandoned: dropped
+    unsuccessful --> accepted: try again
+    unsuccessful --> abandoned: give up
+    successful --> [*]
+    abandoned --> [*]
+```
+
+Rejecting, abandoning and recording a failure all **require a reason**. The
+ones that cost something are the ones that have to be explained, so the memory
+an agent searches before proposing an idea can say why it was turned down.
+
+---
+
 ## Repository layout
 
 | Path | What it is |
@@ -98,7 +149,7 @@ logs the attempt, and only then calls it.
 | [`modules/telegram`](modules/telegram/README.md) | Telegram bot gateway |
 | [`modules/voice-assistant`](modules/voice-assistant/backend/README.md) | Voice backend (FastAPI + WebSocket) and Nuxt frontend |
 | [`config/`](config) | `tool_policy.yaml` and `repositories.yaml` — who may call what, against which repo |
-| [`deploy/launchd`](deploy/launchd/README.md) | Scheduled scan, review, recommend and dashboard jobs |
+| [`deploy/launchd`](deploy/launchd/README.md) | The nightly cycle job, and the dashboard service |
 | [`scripts/`](scripts/README.md) | Start scripts for each service combination |
 | [`Documents/`](Documents) | Design documents and contracts |
 

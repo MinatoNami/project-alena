@@ -263,3 +263,20 @@ async def test_a_server_that_will_not_start_does_not_take_the_catalog_with_it(
     # Unmarked, so the next turn tries again: one unlucky start should not cost
     # the planner half its tools for the life of the process.
     assert not catalog.discovered
+
+
+def test_an_underscored_name_resolves_to_the_tool_that_was_meant():
+    """Local models rewrite `repo.search` as `repo_search`. The catalog knows
+    which one that is; making the model spend a turn finding out is waste."""
+    c = catalog()
+    c.register([ToolContract(name="a")])
+    c._contracts["repo.search"] = ToolContract(name="repo.search")
+
+    assert c.canonical("repo_search") == "repo.search"
+    assert c.canonical("repo.search") == "repo.search"
+
+
+def test_a_name_that_matches_nothing_is_left_alone():
+    """Canonicalising is a convenience, not a search. An unknown name stays
+    unknown so the gateway refuses it by that name and says so."""
+    assert catalog().canonical("not_a_tool") == "not_a_tool"

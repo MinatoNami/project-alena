@@ -719,3 +719,64 @@ def test_a_stale_row_for_another_branch_is_not_treated_as_this_one(
     outcome = run(writable, accepted)
 
     assert "uncommitted changes" in outcome.error
+
+
+# -- the two failures the first real implementation exposed -----------------
+
+
+def test_pytest_is_found_in_the_project_virtualenv(tmp_path):
+    """A bare `pytest` is on PATH only if a venv happens to be activated, and
+    launchd activates nothing. The verification step reported "runner not
+    found" while the implementing agent, which looked, ran the same suite."""
+    from modules.improve.action.verify import detect_test_command
+
+    runner = tmp_path / ".venv" / "bin" / "pytest"
+    runner.parent.mkdir(parents=True)
+    runner.write_text("#!/bin/sh\n")
+
+    command = detect_test_command(tmp_path, ["conftest.py"], changed=["a.py"])
+
+    assert str(runner) in command
+
+
+def test_a_subproject_falls_back_to_the_repository_virtualenv(tmp_path):
+    runner = tmp_path / ".venv" / "bin" / "pytest"
+    runner.parent.mkdir(parents=True)
+    runner.write_text("#!/bin/sh\n")
+    (tmp_path / "backend").mkdir()
+
+    command = detect_test_command(
+        tmp_path, ["backend/conftest.py"], changed=["backend/a.py"]
+    )
+
+    assert str(runner) in command
+
+
+def test_without_a_virtualenv_it_still_asks_for_pytest(tmp_path):
+    """Reporting "not found" beats running ALENA's own interpreter against
+    somebody else's dependencies."""
+    from modules.improve.action.verify import detect_test_command
+
+    assert detect_test_command(tmp_path, ["conftest.py"], changed=["a.py"]) == "pytest -q"
+
+
+def test_an_unconfigured_reviewer_is_known_before_the_work(monkeypatch):
+    from modules.improve.action.verify import reviewer_unavailable
+
+    monkeypatch.delenv("CLAUDE_ROUTINE_URL", raising=False)
+    assert "CLAUDE_ROUTINE_URL" in (reviewer_unavailable("claude") or "")
+
+    monkeypatch.setenv("CLAUDE_ROUTINE_URL", "https://example.invalid/hook")
+    assert reviewer_unavailable("claude") is None
+
+
+def test_a_failed_review_does_not_read_as_a_verdict():
+    """"claude says error" reads like a judgement. It is the absence of one."""
+    from modules.improve.action.implement import ImplementationRun
+    from modules.improve.action.verify import DiffReview
+
+    run = ImplementationRun(repository_id="sample", recommendation_id=1)
+    run.branch = "alena/1-x"
+    run.review = DiffReview("claude", "error", "", "CLAUDE_ROUTINE_URL is not set")
+
+    assert "NOT reviewed by claude" in run.describe()

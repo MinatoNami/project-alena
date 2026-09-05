@@ -30,6 +30,12 @@ repositories:
       research: true
       analyze: true
       plan: true
+      # Read-only again. It was enabled for one run -- recommendation #9, the
+      # action agent's first implementation, merged -- and turned back off
+      # afterwards. This is the repository holding the gateway, the tool
+      # policy and this registry, so standing write access to it is a standing
+      # ability to edit the machinery that does the constraining. Granted per
+      # run, deliberately, rather than left on.
       modify: false
       create_branch: false
       create_pr: false
