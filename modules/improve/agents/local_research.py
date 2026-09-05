@@ -74,9 +74,12 @@ proposal that a human decides on later.
 How to work:
 - Look before you write. Use the tools to find out what is actually in this
   repository rather than describing what a project like it usually contains.
-- Call memory.search BEFORE proposing anything. It tells you what has already
-  been proposed and what was rejected, and why. Re-raising a rejected idea
-  wastes a review and a person's attention.
+- memory.search tells you what has already been proposed and what was
+  rejected. Search it with *specific words from an idea you are considering*,
+  not a general one: "test coverage" finds something, "improvements" finds
+  nothing. Every candidate is checked against memory by name before it is
+  recorded, and you will be asked to withdraw anything already decided -- so
+  re-raising a rejected idea only wastes your own turn.
 - **Before saying something is missing, read the code and check.** Finding
   where a thing is *mentioned* is not the same as knowing whether it exists.
   repo.search finds the file; repo.read_file opens it. The most common way to
@@ -121,6 +124,9 @@ class InvestigationRun:
     # The final reply, when it was not the JSON that was asked for. Empty when
     # the model answered properly, including when it properly answered "none".
     unparsed: Optional[str] = None
+    # What each candidate resembled, and which the model then withdrew.
+    resembled: Dict[str, List[str]] = field(default_factory=dict)
+    withdrawn: List[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -134,6 +140,8 @@ class InvestigationRun:
             parts.append(f"{len(self.proposed)} proposed")
         if self.duplicates:
             parts.append(f"{len(self.duplicates)} already outstanding")
+        if self.withdrawn:
+            parts.append(f"{len(self.withdrawn)} withdrawn as already decided")
         if self.unparsed:
             parts.append("its final reply was not the JSON asked for")
         elif not self.candidates:
@@ -221,6 +229,37 @@ def _tool_result_text(result: Any) -> str:
         parts = [str(getattr(item, "text", item)) for item in content]
         return "\n".join(parts)
     return str(content)
+
+
+def memory_notes(repository_id: str, candidates: List[Candidate]) -> Dict[str, List[str]]:
+    """What each candidate resembles, and what was already decided about it.
+
+    Searched *per candidate title*, after the candidates exist. The prompt used
+    to say "call memory.search before proposing anything", which is the wrong
+    moment and the wrong query: an agent that has not yet had an idea searches
+    something generic, and a generic query matches nothing. `project-alena`
+    and `improvements` both return zero, so the check passed silently and the
+    agent went on to re-raise ideas that had been rejected hours earlier.
+
+    A title is a specific query, and it only exists once there is a candidate.
+    """
+    from ..query import search_memory
+
+    notes: Dict[str, List[str]] = {}
+    for candidate in candidates:
+        try:
+            found = search_memory(candidate.title, repository_id, limit=3)
+        except Exception as exc:  # noqa: BLE001 - a failed check is not fatal
+            logger.warning(f"memory check failed for {candidate.title!r}: {exc!r}")
+            continue
+        prior = [
+            f"{row.get('status', 'unknown')}: {row.get('title', '')}"
+            for row in found.get("recommendations", [])
+            if row.get("title") and row.get("title") != candidate.title
+        ]
+        if prior:
+            notes[candidate.title] = prior
+    return notes
 
 
 async def investigate(
@@ -355,6 +394,43 @@ async def investigate(
             return run
 
     run.candidates = parse_candidates(reply, limit=max_candidates)
+
+    # The check that actually stops a repeat: ask memory about each candidate
+    # by name, then let the model withdraw what it recognises. Only costs a
+    # turn when something resembles a prior decision.
+    notes = memory_notes(repository.id, run.candidates) if run.candidates else {}
+    if notes:
+        run.resembled = dict(notes)
+        lines = [
+            "Before these are recorded, here is what each resembles from this "
+            "repository's history, with what was decided:",
+            "",
+        ]
+        for title, prior in notes.items():
+            lines.append(f"- {title}")
+            lines.extend(f"    already {entry}" for entry in prior)
+        lines += [
+            "",
+            "Reply with the JSON object again, keeping only the candidates that "
+            "are genuinely different from what was already decided. Dropping "
+            "all of them is a fine answer. Do not reword a rejected idea to "
+            "make it look new.",
+        ]
+        try:
+            reply = client.chat(
+                [*messages, {"role": "user", "content": "\n".join(lines)}],
+                system_prompt=SYSTEM_PROMPT,
+                tools=[],
+            )
+            run.candidates = parse_candidates(reply, limit=max_candidates)
+            run.withdrawn = [
+                title
+                for title in notes
+                if title not in {c.title for c in run.candidates}
+            ]
+        except Exception as exc:  # noqa: BLE001 - keep what we already have
+            logger.warning(f"the memory check turn failed: {exc!r}")
+
     if not run.candidates:
         # "It found nothing" and "I could not read what it said" look identical
         # from the outside and mean opposite things -- one is a healthy

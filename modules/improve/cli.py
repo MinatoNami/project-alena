@@ -521,6 +521,10 @@ def cmd_investigate(args: argparse.Namespace) -> int:
             print(f"    proposed: {title}")
         for title in run.duplicates:
             print(f"    already outstanding: {title}")
+        for title in run.withdrawn:
+            print(f"    withdrawn, already decided: {title}")
+        if run.unparsed:
+            print(f"    its final reply was not JSON: {run.unparsed[:120]}")
 
     proposed = sum(len(r.proposed) for r in runs)
     print()

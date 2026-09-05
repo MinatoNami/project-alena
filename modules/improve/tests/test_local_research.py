@@ -299,3 +299,64 @@ async def test_finding_nothing_is_not_the_same_as_being_unreadable(registry):
     )
     assert babble.unparsed
     assert "not the JSON" in babble.describe()
+
+
+@pytest.mark.asyncio
+async def test_a_candidate_that_restates_a_rejected_idea_can_be_withdrawn(
+    registry, monkeypatch
+):
+    """The check that failed was the *timing*: an agent with no idea yet
+    searches something generic, and a generic query matches nothing."""
+    from modules.improve.agents import local_research
+
+    monkeypatch.setattr(
+        local_research,
+        "search_memory",
+        None,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "modules.improve.query.search_memory",
+        lambda query, repository_id=None, limit=20: {
+            "recommendations": [
+                {"title": "Fix the tests", "status": "rejected"}
+            ]
+            if "test" in query.lower()
+            else [],
+            "observations": [],
+        },
+    )
+
+    repository = registry.resolve("sample")
+    client = FakeClient([candidates("Fix the tests again"), '{"candidates": []}'])
+
+    run = await investigate(
+        repository, client=client, gateway=FakeGateway(), use_embeddings=False
+    )
+
+    assert run.resembled, "the candidate was checked against memory by name"
+    assert run.withdrawn == ["Fix the tests again"]
+    assert run.proposed == []
+
+
+@pytest.mark.asyncio
+async def test_nothing_resembling_anything_costs_no_extra_turn(registry, monkeypatch):
+    """The confirmation turn is only worth taking when there is something to
+    confirm; otherwise it is a model call for nothing."""
+    monkeypatch.setattr(
+        "modules.improve.query.search_memory",
+        lambda query, repository_id=None, limit=20: {
+            "recommendations": [],
+            "observations": [],
+        },
+    )
+
+    repository = registry.resolve("sample")
+    client = FakeClient([candidates("Something new")])
+
+    run = await investigate(
+        repository, client=client, gateway=FakeGateway(), use_embeddings=False
+    )
+
+    assert client.calls == 1, "no confirmation turn was taken"
+    assert run.proposed == ["Something new"]
