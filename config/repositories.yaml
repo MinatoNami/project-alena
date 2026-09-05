@@ -30,8 +30,13 @@ repositories:
       research: true
       analyze: true
       plan: true
-      modify: false
-      create_branch: false
+      # ALENA may write to its own repository. Worth being deliberate about:
+      # this is where the gateway, the tool policy and this registry live, so
+      # the agent can reach the machinery that constrains it. It still writes
+      # only on a branch, only behind an accepted recommendation, and it still
+      # cannot push -- create_pr and merge stay false.
+      modify: true
+      create_branch: true
       create_pr: false
       merge: false
     agents:
