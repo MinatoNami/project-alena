@@ -31,7 +31,7 @@ researching it, reviewing what turned up, and acting on a decision.
 | Segment | Default | Also available |
 |---|---|---|
 | `scan` | `local` | — |
-| `research` | `chatgpt-work` | — |
+| `research` | `chatgpt-work` | `local` |
 | `review` | `codex` | `claude` |
 | `action` | `codex` | — |
 
@@ -47,6 +47,28 @@ gaps are structural rather than unfinished:
   invoke. Research is the one segment allowed to name an agent ALENA cannot
   call, because that is exactly how research works: documents arrive on
   somebody else's schedule and the cycle ingests them.
+
+### Research ALENA does, rather than waits for
+
+Setting `research: local` makes the local model investigate a repository
+itself, instead of waiting for a document to arrive:
+
+```bash
+scripts/alena_improve.sh investigate project-alena
+```
+
+It runs as `research-agent`, an identity the policy grants nothing but the
+read-only alena-core tools — no `codex_edit`, no calendar, no writes. That is
+the safety property, and it is enforced by the gateway rather than requested in
+a prompt. What it finds enters the pipeline as an observation with source
+`alena-local`, so it is deduplicated, reviewed and scored like anything else,
+and a person still decides. `prompting.preamble_for` reads anything that is not
+the operator as untrusted text, which is the right framing for a model marking
+its own homework.
+
+With `research: local` the nightly cycle investigates as part of the pass,
+after ingesting whatever was dropped — so `memory.search` sees the new
+documents before the agent proposes against them.
 
 Everything else is a missing adapter, and `agents/roster.py` says which. A
 configuration asking for one is refused when the file is read, naming the

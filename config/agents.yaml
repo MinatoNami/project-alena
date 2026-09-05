@@ -25,6 +25,13 @@ version: 1
 
 segments:
   scan: local
+
+  # `chatgpt-work` waits for a document to be dropped in the research
+  # directory. `local` makes ALENA investigate the repository itself, with the
+  # read-only alena-core tools, as part of the nightly pass -- see
+  # `alena-improve investigate`. Both can feed the same pipeline; this picks
+  # what the *cycle* does unattended.
   research: chatgpt-work
+
   review: codex
   action: codex

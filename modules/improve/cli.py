@@ -480,6 +480,54 @@ def cmd_tools(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_investigate(args: argparse.Namespace) -> int:
+    """Let the local model look at a repository and propose what it notices."""
+    import asyncio
+
+    from .agents.local_research import investigate
+    from modules.gateway.pool import close_pool
+
+    registry = load_registry(args.registry)
+    install_gateway(registry, args.policy)
+    ensure_layout()
+
+    async def run_all():
+        runs = []
+        try:
+            for repository in _targets(registry, args.repository, args.all):
+                runs.append(
+                    await investigate(
+                        repository,
+                        note=args.focus,
+                        max_steps=args.max_steps,
+                        max_candidates=args.max_candidates,
+                    )
+                )
+        finally:
+            await close_pool()
+        return runs
+
+    runs = asyncio.run(run_all())
+
+    for run in runs:
+        print(f"  {run.describe()}")
+        for title in run.proposed:
+            print(f"    proposed: {title}")
+        for title in run.duplicates:
+            print(f"    already outstanding: {title}")
+
+    proposed = sum(len(r.proposed) for r in runs)
+    print()
+    if proposed:
+        print(
+            f"{proposed} observation(s) recorded. They are reviewed like any "
+            "other, and nothing is built without your decision."
+        )
+    else:
+        print("Nothing new proposed.")
+    return 1 if any(r.errors for r in runs) else 0
+
+
 def cmd_agents(args: argparse.Namespace) -> int:
     """Who does which segment, and what every other combination would need."""
     from .agents.roster import (
@@ -1003,6 +1051,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip starting the MCP servers to enumerate their tools",
     )
     tools.set_defaults(func=cmd_tools)
+
+    investigate_cmd = sub.add_parser(
+        "investigate",
+        parents=[common],
+        help="Let the local model research a repository and propose findings",
+    )
+    investigate_cmd.add_argument("repository", nargs="?")
+    investigate_cmd.add_argument("--all", action="store_true")
+    investigate_cmd.add_argument("--focus", help="A steer for this run")
+    investigate_cmd.add_argument(
+        "--max-steps", type=int, default=10, help="Tool calls before it must write up"
+    )
+    investigate_cmd.add_argument(
+        "--max-candidates", type=int, default=5, help="Proposals to keep"
+    )
+    investigate_cmd.set_defaults(func=cmd_investigate)
 
     agents_cmd = sub.add_parser(
         "agents",

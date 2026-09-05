@@ -56,6 +56,7 @@ class RepositoryCycle:
     scanned: bool = False
     unchanged: bool = False
     ingested: int = 0
+    investigated: int = 0
     observations: int = 0
     duplicates: List[str] = field(default_factory=list)
     reviewed: int = 0
@@ -71,6 +72,10 @@ class RepositoryCycle:
         parts.append("unchanged" if self.unchanged else "scanned")
         if self.ingested:
             parts.append(f"{self.ingested} document(s), {self.observations} new")
+        elif self.observations:
+            parts.append(f"{self.observations} new observation(s)")
+        if self.investigated:
+            parts.append(f"investigated in {self.investigated} tool call(s)")
         if self.duplicates:
             parts.append(f"{len(self.duplicates)} already outstanding")
         if self.reviewed:
@@ -125,9 +130,11 @@ async def cycle_repository_async(
     note: Optional[str] = None,
     force: bool = False,
     executor=None,
+    researcher: Optional[str] = None,
+    client=None,
     conn=None,
 ) -> RepositoryCycle:
-    """Scan, ingest, review and score one repository. Never implement."""
+    """Scan, research, ingest, review and score one repository. Never implement."""
     result = RepositoryCycle(repository.id)
 
     outcome = scan_repository(
@@ -149,6 +156,20 @@ async def cycle_repository_async(
             result.ingested += 1
         result.observations += len(ingested.accepted)
         result.duplicates.extend(ingested.duplicates)
+
+    # ALENA's own research, if the roster says a local agent does it. Runs
+    # after ingest so both sources of observation are in before the reviewer
+    # looks, and so the agent's memory.search sees what was just dropped.
+    if researcher == "local":
+        from .agents.local_research import investigate
+
+        found = await investigate(
+            repository, note=note, client=client, conn=conn
+        )
+        result.investigated = found.tool_calls
+        result.observations += len(found.proposed)
+        result.duplicates.extend(found.duplicates)
+        result.errors.extend(found.errors)
 
     review = await review_repository_async(
         repository, note=note, executor=executor, conn=conn
@@ -174,6 +195,11 @@ def cycle(
         if repository_id
         else registry.all()
     )
+
+    if "researcher" not in kwargs:
+        from .agents.roster import RESEARCH, load
+
+        kwargs["researcher"] = load().agent_for(RESEARCH)
 
     async def run() -> CycleRun:
         result = CycleRun()

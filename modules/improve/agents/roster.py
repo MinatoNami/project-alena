@@ -81,14 +81,8 @@ AGENTS: Dict[str, Agent] = {
             name="local",
             description="Whatever LM Studio has loaded, through the Tool Gateway",
             reach="local",
-            segments=frozenset({SCAN}),
+            segments=frozenset({SCAN, RESEARCH}),
             gaps={
-                RESEARCH: (
-                    "needs an agent loop that investigates a repository with "
-                    "repo.search, repo.find_todos and memory.search and writes "
-                    "observations. The tools exist and the model can call them; "
-                    "nothing drives them yet"
-                ),
                 REVIEW: (
                     "not wired. A review has to return a scored verdict this "
                     "pipeline can parse, and only the Codex and Claude prompts "
@@ -112,7 +106,11 @@ AGENTS: Dict[str, Agent] = {
                     "spending a Codex call on one buys nothing the local model "
                     "does not already do for free"
                 ),
-                RESEARCH: "not wired; see the local agent's note",
+                RESEARCH: (
+                    "not wired. The local agent does this through alena-core's "
+                    "read-only tools; a Codex investigation would cost a call "
+                    "per repository per night for the same reading"
+                ),
             },
         ),
         Agent(
