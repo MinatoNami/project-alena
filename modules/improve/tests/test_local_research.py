@@ -239,3 +239,63 @@ async def test_a_repository_that_does_not_grant_research_is_refused(registry):
     run = await investigate(repository, client=FakeClient([]), gateway=FakeGateway())
 
     assert not run.ok
+
+
+@pytest.mark.asyncio
+async def test_the_prompt_does_not_grow_without_bound(registry):
+    """Everything read accumulates, and a local model slows down as it does --
+    until a turn stops finishing. The timeout was the symptom."""
+    from modules.improve.agents.local_research import KEEP_FULL_RESULTS
+
+    repository = registry.resolve("sample")
+
+    class BigGateway(FakeGateway):
+        async def call(self, server, tool, arguments, *, agent=None, repository_id=None):
+            self.calls.append((tool, arguments, agent))
+            return "x" * 3000
+
+    gateway = BigGateway()
+    seen_lengths = []
+
+    class MeasuringClient(FakeClient):
+        def chat(self, messages, *, system_prompt=None, tools=None):
+            seen_lengths.append(sum(len(m.get("content") or "") for m in messages))
+            return super().chat(messages, system_prompt=system_prompt, tools=tools)
+
+    client = MeasuringClient(
+        [tool_call("repo.search", repository_id="sample", pattern=str(i)) for i in range(6)]
+        + [candidates("Something")]
+    )
+
+    await investigate(
+        repository, client=client, gateway=gateway, max_steps=8, use_embeddings=False
+    )
+
+    assert len(seen_lengths) > KEEP_FULL_RESULTS + 1
+    ceiling = (KEEP_FULL_RESULTS + 1) * 3600
+    assert max(seen_lengths) < ceiling, f"prompt grew to {max(seen_lengths)}"
+
+
+@pytest.mark.asyncio
+async def test_finding_nothing_is_not_the_same_as_being_unreadable(registry):
+    """One is a healthy repository, the other is a broken agent, and they used
+    to print the same sentence."""
+    repository = registry.resolve("sample")
+
+    empty = await investigate(
+        repository,
+        client=FakeClient(['{"candidates": []}']),
+        gateway=FakeGateway(),
+        use_embeddings=False,
+    )
+    assert empty.unparsed is None
+    assert "nothing stood out" in empty.describe()
+
+    babble = await investigate(
+        repository,
+        client=FakeClient(["I had a look and it seems fine to me!"]),
+        gateway=FakeGateway(),
+        use_embeddings=False,
+    )
+    assert babble.unparsed
+    assert "not the JSON" in babble.describe()

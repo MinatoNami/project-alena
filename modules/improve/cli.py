@@ -499,8 +499,14 @@ def cmd_investigate(args: argparse.Namespace) -> int:
                     await investigate(
                         repository,
                         note=args.focus,
-                        max_steps=args.max_steps,
-                        max_candidates=args.max_candidates,
+                        **{
+                            key: value
+                            for key, value in (
+                                ("max_steps", args.max_steps),
+                                ("max_candidates", args.max_candidates),
+                            )
+                            if value is not None
+                        },
                     )
                 )
         finally:
@@ -1060,11 +1066,15 @@ def build_parser() -> argparse.ArgumentParser:
     investigate_cmd.add_argument("repository", nargs="?")
     investigate_cmd.add_argument("--all", action="store_true")
     investigate_cmd.add_argument("--focus", help="A steer for this run")
+    # Defaults come from the agent, not from a second copy here that drifts.
     investigate_cmd.add_argument(
-        "--max-steps", type=int, default=10, help="Tool calls before it must write up"
+        "--max-steps",
+        type=int,
+        default=None,
+        help="Tool calls before it must write up",
     )
     investigate_cmd.add_argument(
-        "--max-candidates", type=int, default=5, help="Proposals to keep"
+        "--max-candidates", type=int, default=None, help="Proposals to keep"
     )
     investigate_cmd.set_defaults(func=cmd_investigate)
 

@@ -44,11 +44,48 @@ def _error(exc: Exception) -> str:
 
 
 @mcp.tool(name="repo.search")
-def repo_search(repository_id: str, pattern: str, max_results: int = 50) -> str:
-    """Search a declared repository's tracked files for a regular expression."""
+def repo_search(
+    repository_id: str,
+    pattern: str,
+    max_results: int = 50,
+    context: int = 0,
+    exclude: str = "",
+) -> str:
+    """Search a declared repository's tracked files for a regular expression.
+
+    `context` returns that many lines either side of each hit, which is how you
+    tell a `# FIXME` comment from the word FIXME inside a string or a document.
+    `exclude` drops paths matching a glob, e.g. `Documents/*`.
+    """
     try:
-        return _dump(query.search_repository(repository_id, pattern, max_results))
+        return _dump(
+            query.search_repository(
+                repository_id,
+                pattern,
+                max_results,
+                context=context,
+                exclude=exclude or None,
+            )
+        )
     except (RegistryError, Exception) as exc:  # noqa: B014 - RegistryError is a ValueError
+        return _error(exc)
+
+
+@mcp.tool(name="repo.read_file")
+def repo_read_file(
+    repository_id: str, path: str, start: int = 1, limit: int = 200
+) -> str:
+    """Read one tracked file from a declared repository, or a slice of it.
+
+    Use this before proposing a change: finding where something is *mentioned*
+    is not the same as knowing whether it is already implemented.
+
+    Only files git tracks can be read, and only inside the declared workspace,
+    so ignored files -- .env, keys, build output -- are out of reach.
+    """
+    try:
+        return _dump(query.read_repository_file(repository_id, path, start, limit))
+    except Exception as exc:  # noqa: BLE001
         return _error(exc)
 
 

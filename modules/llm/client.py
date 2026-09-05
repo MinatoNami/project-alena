@@ -47,6 +47,22 @@ class LLMConfig:
     timeout_s: float = 120.0
     debug: bool = False
 
+    @classmethod
+    def from_env(cls) -> "LLMConfig":
+        """The configuration the operator actually set.
+
+        Every caller wants this, and each one writing its own `os.getenv` block
+        is how a component ends up quietly ignoring `LLM_TIMEOUT` -- which is
+        exactly what the research agent did, timing out at the library default
+        while `.env` asked for something longer.
+        """
+        return cls(
+            base_url=os.getenv("LLM_BASE_URL", cls.base_url),
+            model=os.getenv("LLM_MODEL", cls.model),
+            timeout_s=float(os.getenv("LLM_TIMEOUT", cls.timeout_s)),
+            debug=os.getenv("LLM_DEBUG", "0") == "1",
+        )
+
     def normalized_base_url(self) -> str:
         return self.base_url.rstrip("/")
 

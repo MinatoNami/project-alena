@@ -41,11 +41,26 @@ from ..research.propose import propose
 RESEARCH_AGENT = "research-agent"
 LOCAL_SOURCE = "alena-local"
 
-# Enough turns to look at a few things and then write. The cost of a low limit
-# is a shallow answer; the cost of a high one is a model that browses forever,
-# so this is deliberately closer to "read three things and commit".
-DEFAULT_MAX_STEPS = 10
+# Enough turns to search, read what the search found, and then write. Reading
+# is what stops it proposing work that is already done, and reading costs a
+# turn per file -- so this is higher than it looks like it needs to be. The
+# cost of a low limit is a confident guess.
+DEFAULT_MAX_STEPS = 14
 DEFAULT_MAX_CANDIDATES = 5
+# Per tool result. Enough for a file worth reading, bounded so fourteen of them
+# do not become the whole context window.
+MAX_RESULT_CHARS = 3500
+# Research turns are long: fourteen steps of accumulated file contents is a
+# much bigger prompt than a chat message, and the local model slows down as it
+# grows. The assistant's 120s default is not the right number here, so it is
+# raised unless the operator has said what they want.
+RESEARCH_TIMEOUT_S = 420.0
+# How many tool results stay in the prompt verbatim. Everything a model reads
+# accumulates, so a fourteen-step investigation that reads six files carries
+# all six into every later turn -- and a local model gets slower as that grows,
+# until a turn does not finish at all. Recent results are what it is reasoning
+# about; older ones it can read again if it needs them.
+KEEP_FULL_RESULTS = 3
 
 _FENCE = re.compile(r"```(?:json)?\s*(?P<body>\{.*?\})\s*```", re.DOTALL)
 _BARE = re.compile(r"(?P<body>\{[^{}]*\"candidates\".*\})", re.DOTALL)
@@ -62,10 +77,18 @@ How to work:
 - Call memory.search BEFORE proposing anything. It tells you what has already
   been proposed and what was rejected, and why. Re-raising a rejected idea
   wastes a review and a person's attention.
-- Ground each proposal in something you actually saw: a file, a TODO, a
-  dependency, a commit. A proposal with no evidence is an opinion.
+- **Before saying something is missing, read the code and check.** Finding
+  where a thing is *mentioned* is not the same as knowing whether it exists.
+  repo.search finds the file; repo.read_file opens it. The most common way to
+  waste a reviewer's time is proposing work that is already done.
+- Searching a word gets you every place the word appears, including plans,
+  comments and string literals. Pass `context` to see what a hit sits in, and
+  `exclude` (e.g. "Documents/*") when you want code rather than the documents
+  that describe it. A match inside a markdown table is not a code problem.
+- Ground each proposal in something you actually read: a file and what it
+  does, a dependency, a commit. A proposal with no evidence is an opinion.
 - Prefer few, specific and checkable over many and vague. Three real findings
-  beat ten plausible ones.
+  beat ten plausible ones, and one verified finding beats three guesses.
 
 When you are done investigating, reply with ONLY a JSON object, no prose:
 
@@ -95,6 +118,9 @@ class InvestigationRun:
     duplicates: List[str] = field(default_factory=list)
     tool_calls: int = 0
     errors: List[str] = field(default_factory=list)
+    # The final reply, when it was not the JSON that was asked for. Empty when
+    # the model answered properly, including when it properly answered "none".
+    unparsed: Optional[str] = None
 
     @property
     def ok(self) -> bool:
@@ -108,7 +134,9 @@ class InvestigationRun:
             parts.append(f"{len(self.proposed)} proposed")
         if self.duplicates:
             parts.append(f"{len(self.duplicates)} already outstanding")
-        if not self.candidates:
+        if self.unparsed:
+            parts.append("its final reply was not the JSON asked for")
+        elif not self.candidates:
             parts.append("nothing stood out")
         return f"{self.repository_id}: " + ", ".join(parts)
 
@@ -162,6 +190,30 @@ def _parse_tool_call(reply: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _shrink_old_results(messages: List[Dict[str, Any]]) -> None:
+    """Keep the last few tool results in full and collapse the rest.
+
+    Bounding the prompt rather than raising the timeout again: the timeout was
+    a symptom. An investigation that reads six files was carrying all six into
+    every subsequent turn, and the model slowed down until a turn stopped
+    finishing. The header stays so the model can see it looked at something and
+    read it again if it matters.
+    """
+    seen = 0
+    for message in reversed(messages):
+        content = message.get("content") or ""
+        if message.get("role") != "user" or not content.startswith("Result of "):
+            continue
+        seen += 1
+        if seen <= KEEP_FULL_RESULTS or len(content) < 200:
+            continue
+        header = content.split("\n", 1)[0]
+        message["content"] = (
+            f"{header}\n[read earlier; dropped from the prompt to keep it small. "
+            "Ask again if you need it.]"
+        )
+
+
 def _tool_result_text(result: Any) -> str:
     """Whatever the MCP call returned, as something to put back in the prompt."""
     content = getattr(result, "content", result)
@@ -203,9 +255,18 @@ async def investigate(
         await ensure_discovered(gateway)
 
     if client is None:
+        import os
+        from dataclasses import replace
+
         from modules.llm import LLMChatClient, LLMConfig
 
-        client = LLMChatClient(LLMConfig())
+        # from_env, not the library defaults: an operator who set LLM_TIMEOUT
+        # meant it. Absent that, use a limit that suits a long research turn
+        # rather than a chat reply.
+        config = LLMConfig.from_env()
+        if "LLM_TIMEOUT" not in os.environ:
+            config = replace(config, timeout_s=RESEARCH_TIMEOUT_S)
+        client = LLMChatClient(config)
 
     tools = gateway.catalog.openai_tools(RESEARCH_AGENT)
     if not tools:
@@ -265,9 +326,16 @@ async def investigate(
             logger.info(f"research-agent refused {tool}: {exc}")
 
         run.tool_calls += 1
-        messages.append(
-            {"role": "user", "content": f"Result of {tool}:\n{observed[:4000]}"}
-        )
+        # Truncation is announced. A silently cut file read is how a model
+        # concludes a function is missing from the half it was shown.
+        body = observed[:MAX_RESULT_CHARS]
+        if len(observed) > MAX_RESULT_CHARS:
+            body += (
+                f"\n\n[cut after {MAX_RESULT_CHARS} characters. Read further "
+                "with repo.read_file and a higher `start`.]"
+            )
+        messages.append({"role": "user", "content": f"Result of {tool}:\n{body}"})
+        _shrink_old_results(messages)
     else:
         # Out of steps with the model still asking for tools. Give it one turn
         # to write up what it has rather than throwing the investigation away.
@@ -288,6 +356,15 @@ async def investigate(
 
     run.candidates = parse_candidates(reply, limit=max_candidates)
     if not run.candidates:
+        # "It found nothing" and "I could not read what it said" look identical
+        # from the outside and mean opposite things -- one is a healthy
+        # repository, the other is a broken agent. Tell them apart.
+        if '"candidates"' not in (reply or ""):
+            run.unparsed = (reply or "").strip()[:600]
+            logger.warning(
+                f"{repository.id}: the research agent's final reply was not the "
+                f"expected JSON: {run.unparsed[:200]}"
+            )
         return run
 
     for candidate in run.candidates:
