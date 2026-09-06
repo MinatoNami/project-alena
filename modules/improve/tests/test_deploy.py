@@ -21,7 +21,7 @@ SCHEDULED = {
 
 # Long-running services. A different plist shape entirely: KeepAlive and
 # RunAtLoad, no StartCalendarInterval.
-SERVICES = {"local.alena.dashboard"}
+SERVICES = {"local.alena.dashboard", "local.alena.routine"}
 
 EXPECTED = SCHEDULED
 
@@ -79,7 +79,14 @@ def test_every_template_goes_through_a_wrapper(path):
     """launchd gives a job a bare PATH; the wrappers are what fix that."""
     data = plistlib.loads(path.read_bytes())
     joined = " ".join(data["ProgramArguments"])
-    assert "scripts/alena_improve.sh" in joined or "scripts/start_alena_dashboard.sh" in joined
+    assert any(
+        wrapper in joined
+        for wrapper in (
+            "scripts/alena_improve.sh",
+            "scripts/start_alena_dashboard.sh",
+            "scripts/start_claude_routine_shim.sh",
+        )
+    )
 
 
 def test_the_nightly_job_runs_the_whole_sequence():

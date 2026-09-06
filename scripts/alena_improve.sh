@@ -12,10 +12,20 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if [[ -f "$ROOT_DIR/.env" ]]; then
+  # What the caller already exported wins over the file. `set -a; source`
+  # assigns unconditionally, so an *empty* line in .env silently beat a value
+  # exported on the command line -- which is how
+  # `CLAUDE_ROUTINE_URL=... alena_improve.sh check-routine` reported that
+  # CLAUDE_ROUTINE_URL was not set. Snapshotting the exported environment and
+  # replaying it afterwards keeps .env as the default and the caller as the
+  # override, which is the way round everything else works.
+  _env_before="$(export -p)"
   set -a
   # shellcheck disable=SC1090
   source "$ROOT_DIR/.env"
   set +a
+  eval "$_env_before"
+  unset _env_before
 fi
 
 # Relative config paths in .env are relative to the repo, not to whatever
