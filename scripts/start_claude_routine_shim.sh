@@ -13,10 +13,13 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if [[ -f "$ROOT_DIR/.env" ]]; then
+  _env_before="$(export -p)"
   set -a
   # shellcheck disable=SC1090
   source "$ROOT_DIR/.env"
   set +a
+  eval "$_env_before"
+  unset _env_before
 fi
 
 # launchd gives a job a bare PATH, and the CLI is usually installed by npm.
