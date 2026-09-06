@@ -179,3 +179,39 @@ def test_a_rejected_idea_says_why_when_it_comes_back(registry, drop):
 
     assert "already rejected" in again.duplicate_reason
     assert "not this quarter" in again.duplicate_reason
+
+
+# -- derived state -----------------------------------------------------------
+
+
+def test_a_cycle_leaves_the_portfolio_current(registry, drop):
+    """The capability graph is computed from the scans the pass just took.
+
+    Refreshing it separately, on its own schedule, is how the portfolio ends
+    up describing repositories as they were last week.
+    """
+    run = cycle(registry, "sample", drop=drop, summarize=False, executor=codex())
+
+    assert run.portfolio, "the cycle wrote no portfolio"
+    assert run.portfolio_error is None
+    assert not run.failed
+
+
+def test_a_failed_refresh_is_reported_rather_than_raised(
+    registry, drop, monkeypatch
+):
+    """The pass that already succeeded is not undone by it -- but a portfolio
+    quietly describing last week is worse than a visible error, so the run
+    counts as failed."""
+    from modules.improve import cycle as cycle_module
+
+    def boom(_registry):
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(cycle_module, "refresh_portfolio", boom)
+
+    run = cycle(registry, "sample", drop=drop, summarize=False, executor=codex())
+
+    assert run.repositories[0].scanned
+    assert run.portfolio_error == "disk full"
+    assert run.failed

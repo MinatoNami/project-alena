@@ -24,6 +24,12 @@ from .scan import GitRepository
 from .text import jaccard
 
 MAX_SEARCH_RESULTS = 200
+# A line of context is cheap; a screenful per hit fills the model's window with
+# one search. Three either side is enough to tell a comment from a string.
+MAX_CONTEXT_LINES = 10
+# A read has to be bounded or one generated file becomes the whole prompt.
+MAX_READ_LINES = 400
+MAX_LINE_LENGTH = 500
 
 
 def _registry(registry: Optional[RepositoryRegistry] = None) -> RepositoryRegistry:
@@ -64,30 +70,134 @@ def search_repository(
     pattern: str,
     max_results: int = 100,
     registry: Optional[RepositoryRegistry] = None,
+    context: int = 0,
+    exclude: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Search a repository's tracked files.
 
     Tracked-only, via `git grep`, so build output and vendored dependencies are
     skipped without needing to know what they are called. The workspace comes
     from the registry; the caller supplies a pattern, never a path.
+
+    `context` asks for surrounding lines, and it exists because of a specific
+    failure. A bare matching line cannot distinguish a `# FIXME` comment from
+    the word FIXME inside a markdown table, a spec bullet or a string literal.
+    ALENA's own research agent searched for FIXME, got three hits that were all
+    prose or fixtures, and proposed work that did not need doing. Context is
+    what makes that judgeable.
+
+    `exclude` drops paths matching a glob -- `Documents/*` when you want code
+    rather than the plans that describe it.
     """
     repository = _registry(registry).resolve(repository_id, "analyze")
     if not pattern.strip():
         return []
 
     git = GitRepository(repository.workspace)
+    context = max(0, min(int(context or 0), MAX_CONTEXT_LINES))
     hits = []
-    for line in git.grep([pattern], max_results=min(max_results, MAX_SEARCH_RESULTS)):
+    for line in git.grep(
+        [pattern],
+        max_results=min(max_results, MAX_SEARCH_RESULTS),
+        exclude=exclude,
+    ):
         path, _, rest = line.partition(":")
         number, _, text = rest.partition(":")
-        hits.append(
-            {
-                "path": path,
-                "line": int(number) if number.isdigit() else 0,
-                "text": text.strip()[:300],
-            }
-        )
+        hit = {
+            "path": path,
+            "line": int(number) if number.isdigit() else 0,
+            "text": text.strip()[:300],
+        }
+        if context and hit["line"]:
+            hit["context"] = _context_lines(
+                repository.workspace, path, hit["line"], context
+            )
+        hits.append(hit)
     return hits
+
+
+def _context_lines(workspace, path: str, line: int, radius: int) -> List[Dict[str, Any]]:
+    """The lines around a hit, numbered, so a caller can see what it sits in."""
+    from pathlib import Path
+
+    target = Path(workspace) / path
+    try:
+        lines = target.read_text(errors="replace").splitlines()
+    except OSError:
+        return []
+    start = max(0, line - 1 - radius)
+    end = min(len(lines), line + radius)
+    return [
+        {"line": index + 1, "text": lines[index][:MAX_LINE_LENGTH]}
+        for index in range(start, end)
+    ]
+
+
+def read_repository_file(
+    repository_id: str,
+    path: str,
+    start: int = 1,
+    limit: int = 200,
+    registry: Optional[RepositoryRegistry] = None,
+) -> Dict[str, Any]:
+    """Read one tracked file, or a slice of it.
+
+    The gap this closes: an agent could find where something was *mentioned*
+    and never open it, so it could not tell a capability that already exists
+    from one that does not. Two of the first three findings ALENA's research
+    agent produced were rejected as "already implemented", and the reviewer
+    established that by reading the file the agent could only grep.
+
+    **Tracked files only, and the registry resolves the workspace.** `git
+    ls-files` is the allowlist: it excludes anything ignored -- `.env`, keys,
+    build output -- without needing a denylist of secrets to keep current. A
+    path that escapes the workspace, or that git does not know about, is
+    refused rather than read. That matters more here than elsewhere, because a
+    client reaching alena-core talks to it directly with no gateway in between.
+    """
+    from pathlib import Path
+
+    repository = _registry(registry).resolve(repository_id, "analyze")
+    workspace = Path(repository.workspace).resolve()
+
+    requested = (path or "").strip()
+    if not requested:
+        raise RegistryError("A path is required")
+
+    target = (workspace / requested).resolve()
+    try:
+        relative = target.relative_to(workspace)
+    except ValueError:
+        raise RegistryError(
+            f"{requested} is outside {repository_id}'s workspace"
+        ) from None
+
+    git = GitRepository(workspace)
+    if str(relative) not in set(git.tracked_files()):
+        raise RegistryError(
+            f"{relative} is not a tracked file in {repository_id}. Only files "
+            "git knows about can be read, which is what keeps ignored files "
+            "-- .env, keys, build output -- out of reach."
+        )
+
+    try:
+        content = target.read_text(errors="replace")
+    except OSError as exc:
+        raise RegistryError(f"Could not read {relative}: {exc}") from None
+
+    lines = content.splitlines()
+    start = max(1, int(start or 1))
+    limit = max(1, min(int(limit or 200), MAX_READ_LINES))
+    window = lines[start - 1 : start - 1 + limit]
+
+    return {
+        "path": str(relative),
+        "start": start,
+        "lines": len(lines),
+        "returned": len(window),
+        "truncated": start - 1 + len(window) < len(lines),
+        "text": "\n".join(line[:MAX_LINE_LENGTH] for line in window),
+    }
 
 
 def repository_todos(repository_id: str) -> List[Dict[str, Any]]:

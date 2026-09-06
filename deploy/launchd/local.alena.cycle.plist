@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The nightly pass, in one job.
+
+  Scan, ingest whatever research has been dropped, review what is new, score
+  it, and refresh the portfolio. In that order, because they are useless out
+  of it: a review with nothing ingested reviews nothing.
+
+  This replaces the separate scan, review and recommend jobs. They ran on
+  three different days, so a research document dropped on a Thursday waited
+  six days for a review, and a scan and the review of it were never part of
+  the same run. One job a night is also one log to read.
+
+  Nightly is not more expensive than weekly was. An unchanged repository is
+  skipped without reaching the model, and review costs one Codex call per
+  *new* observation, so the bill follows how much has actually changed rather
+  than how often this runs.
+
+  It stops at the approval gate. Nothing here writes to a repository.
+
+  Replace /Users/YOU with your path before installing.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>local.alena.cycle</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/YOU/git-repos/project-alena/scripts/alena_improve.sh</string>
+    <string>cycle</string>
+    <string>--all</string>
+  </array>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>2</integer>
+    <key>Minute</key><integer>0</integer>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/Users/YOU/.alena/logs/cycle.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/YOU/.alena/logs/cycle.log</string>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/YOU/git-repos/project-alena</string>
+
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>

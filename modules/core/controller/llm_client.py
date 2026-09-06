@@ -79,12 +79,8 @@ LLM_DEBUG = os.getenv("LLM_DEBUG", "0") == "1"
 
 
 def _config() -> LLMConfig:
-    return LLMConfig(
-        base_url=LLM_BASE_URL,
-        model=LLM_MODEL,
-        timeout_s=LLM_TIMEOUT,
-        debug=LLM_DEBUG,
-    )
+    """The same environment every other caller reads, read in one place."""
+    return LLMConfig.from_env()
 
 
 # One client for the process: it caches which model LM Studio has loaded, so a

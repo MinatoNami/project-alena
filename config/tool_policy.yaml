@@ -101,6 +101,13 @@ tools:
     side_effect: read_only
     allowed_agents: ["*"]
 
+  # Tracked files only, inside a declared workspace. `git ls-files` is the
+  # allowlist, so anything ignored -- .env, keys, build output -- cannot be
+  # read, without needing a denylist of secrets to keep current.
+  repo.read_file:
+    side_effect: read_only
+    allowed_agents: ["*"]
+
   repo.find_todos:
     side_effect: read_only
     allowed_agents: ["*"]

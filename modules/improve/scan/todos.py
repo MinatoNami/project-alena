@@ -67,15 +67,24 @@ def diff_todos(
     current: Sequence[Todo], previous: Sequence[dict]
 ) -> Dict[str, List[dict]]:
     """What appeared and what went away since the previous scan."""
-    previous_todos = [
-        Todo(
-            path=item.get("path", ""),
-            line=int(item.get("line", 0)),
-            marker=item.get("marker", ""),
-            text=item.get("text", ""),
+    previous_todos = []
+    for item in previous:
+        if not isinstance(item, dict) or not all(
+            isinstance(item.get(field), str) for field in ("path", "marker", "text")
+        ):
+            continue
+        try:
+            line = int(item.get("line", 0))
+        except (TypeError, ValueError):
+            line = 0
+        previous_todos.append(
+            Todo(
+                path=item["path"],
+                line=line,
+                marker=item["marker"],
+                text=item["text"],
+            )
         )
-        for item in previous
-    ]
     current_keys = {todo.key for todo in current}
     previous_keys = {todo.key for todo in previous_todos}
 

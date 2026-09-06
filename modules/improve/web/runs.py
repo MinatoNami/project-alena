@@ -91,8 +91,9 @@ COMMANDS: Dict[str, Command] = {
             "cycle",
             "Run a cycle",
             ["cycle", "--all"],
-            "Scan, ingest whatever research has been dropped, review what is new "
-            "and score it. Stops at the approval gate: nothing is built.",
+            "Scan, ingest whatever research has been dropped, review what is new, "
+            "score it and refresh the portfolio. The same pass the nightly job "
+            "runs. Stops at the approval gate: nothing is built.",
             costs="one Codex call per new observation",
             accepts_focus=True,
         ),

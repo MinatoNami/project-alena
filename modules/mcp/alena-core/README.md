@@ -39,7 +39,8 @@ read is an executable action makes every client treat it as one.
 
 | Tool | What it does |
 |---|---|
-| `repo.search` | Regex over a repository's tracked files |
+| `repo.search` | Regex over a repository's tracked files, with optional context lines |
+| `repo.read_file` | One tracked file, or a slice of it |
 | `repo.find_todos` | TODO and FIXME markers from the last scan |
 | `repo.get_dependencies` | Everything declared, across every manifest |
 | `repo.get_history` | Recent scans, newest first |
@@ -78,7 +79,7 @@ agents, not whoever else holds the server's address.
 So the safety property is structural rather than enforced at call time: every
 tool here reads, none writes — the doorway included, which can only reach
 resources, and every resource is a read. `config/tool_policy.yaml` declares all
-ten as `read_only`, and `tests/test_server.py` asserts it. Adding a tool that
+eleven as `read_only`, and `tests/test_server.py` asserts it. Adding a tool that
 writes fails the build, which is the point — that decision should be a
 conversation, not a commit.
 

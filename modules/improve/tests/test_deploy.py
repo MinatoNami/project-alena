@@ -13,11 +13,10 @@ import pytest
 
 LAUNCHD = Path(__file__).resolve().parents[3] / "deploy" / "launchd"
 
-# Jobs that run on a timer.
+# Jobs that run on a timer. One, now: the pass is sequential, so scheduling its
+# steps separately only created ways for them to run out of order.
 SCHEDULED = {
-    "local.alena.scan": {"Hour": 2, "Minute": 0},
-    "local.alena.review": {"Weekday": 3, "Hour": 22, "Minute": 30},
-    "local.alena.recommend": {"Weekday": 4, "Hour": 7, "Minute": 0},
+    "local.alena.cycle": {"Hour": 2, "Minute": 0},
 }
 
 # Long-running services. A different plist shape entirely: KeepAlive and
@@ -81,6 +80,19 @@ def test_every_template_goes_through_a_wrapper(path):
     data = plistlib.loads(path.read_bytes())
     joined = " ".join(data["ProgramArguments"])
     assert "scripts/alena_improve.sh" in joined or "scripts/start_alena_dashboard.sh" in joined
+
+
+def test_the_nightly_job_runs_the_whole_sequence():
+    """One job, not three.
+
+    Scan, ingest, review and score are useless out of order, and on separate
+    timers they were also days apart -- a document dropped on a Thursday
+    waited until the following Wednesday to be reviewed.
+    """
+    data = plistlib.loads((LAUNCHD / "local.alena.cycle.plist").read_bytes())
+    arguments = data["ProgramArguments"]
+
+    assert arguments[-2:] == ["cycle", "--all"]
 
 
 def test_nothing_schedules_the_action_agent():

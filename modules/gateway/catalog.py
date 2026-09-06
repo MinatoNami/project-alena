@@ -89,6 +89,27 @@ class ToolCatalog:
                 continue
             self._contracts[contract.name] = contract
 
+    def canonical(self, name: str) -> str:
+        """The catalog's name for what a model asked for.
+
+        Local models rewrite `repo.search` as `repo_search` -- dots are unusual
+        in a function name and the tokeniser is not attached to them. The call
+        is then refused as unknown, which costs the model a turn to discover.
+
+        This is a *caller-side* convenience and deliberately not part of
+        `get()`: the gateway resolving loose names would make "the policy names
+        the tool exactly" untrue at the boundary that enforces it. A caller
+        canonicalises, and the gateway still checks what it is handed.
+        """
+        if name in self._contracts:
+            return name
+        candidates = [
+            known
+            for known in self._contracts
+            if known.replace(".", "_") == name.replace(".", "_")
+        ]
+        return candidates[0] if len(candidates) == 1 else name
+
     def get(self, name: str) -> Optional[CatalogEntry]:
         contract = self._contracts.get(name)
         if contract is None:

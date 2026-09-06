@@ -74,10 +74,19 @@ def propose(
     body: str,
     *,
     evidence: Optional[str] = None,
+    source: str = OPERATOR_SOURCE,
     use_embeddings: bool = True,
     conn=None,
 ) -> ProposalResult:
-    """Record an operator's own idea as an observation."""
+    """Record an idea as an observation, ready for review.
+
+    `source` decides how the reviewer is asked to read it, via
+    `prompting.preamble_for`. The operator's own proposals get a preamble that
+    invites refusal, because the risk there is a reviewer agreeing out of
+    deference. Anything else -- a research document, ALENA's own local research
+    agent -- is read as untrusted third-party text, which is the right framing
+    for a model marking its own homework.
+    """
     repository.require("research")
 
     title = (title or "").strip()[:MAX_TITLE]
@@ -90,11 +99,11 @@ def propose(
     # A proposal gets its own research row so it has the same provenance
     # every other observation has: a source, a date, and something to point at
     # when asking where an idea came from.
-    document = f"# Proposal: {title}\n\nRepository: {repository.id}\nSource: {OPERATOR_SOURCE}\n\n## {title}\n\n{body}\n"
+    document = f"# Proposal: {title}\n\nRepository: {repository.id}\nSource: {source}\n\n## {title}\n\n{body}\n"
     saved = write_research(repository.id, document, title=title)
     research_id, _ = record_research(
         repository_id=repository.id,
-        source=OPERATOR_SOURCE,
+        source=source,
         content=document,
         content_hash=content_hash(document),
         title=title,
@@ -121,7 +130,7 @@ def propose(
         duplicate_reason=verdict.reason if verdict.duplicate else None,
         similarity=verdict.similarity,
         embedding=pack_embedding(embedding) if embedding else None,
-        source=OPERATOR_SOURCE,
+        source=source,
         conn=conn,
     )
 

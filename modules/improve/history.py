@@ -232,7 +232,16 @@ def timeline(
     # Timestamps are ISO-8601 UTC throughout, so sorting the strings sorts the
     # instants -- no parsing, and no failure on a row written by an older
     # version with a slightly different format.
-    events.sort(key=lambda e: e.at or "", reverse=True)
+    #
+    # The pipeline position breaks a tie. Stamps are milliseconds, and a scan
+    # and the research ingested straight after it can land in the same one; a
+    # stable sort then falls back to the order `_SOURCES` happened to be
+    # iterated in, which put the *earlier* event first and made the timeline
+    # occasionally lie about what followed what. Two events in the same
+    # millisecond have no knowable order, so the one later in the pipeline is
+    # the better guess -- and, more importantly, it is always the same guess.
+    position = {kind: index for index, kind in enumerate(KINDS)}
+    events.sort(key=lambda e: (e.at or "", position.get(e.kind, -1)), reverse=True)
     return events[:limit]
 
 

@@ -39,7 +39,14 @@ from ..decide import (
 from ..registry import Repository
 from ..scan import GitError, GitRepository
 from .routing import Pairing, pair_for
-from .verify import DiffReview, TestResult, detect_test_suites, review_diff, run_tests
+from .verify import (
+    DiffReview,
+    TestResult,
+    detect_test_suites,
+    review_diff,
+    reviewer_unavailable,
+    run_tests,
+)
 
 AGENT = "action-agent"
 BRANCH_PREFIX = "alena/"
@@ -139,7 +146,12 @@ class ImplementationRun:
             parts.append(f"{len(self.files_changed)} file(s)")
         if self.tests:
             parts.append(self.tests.describe())
-        if self.review:
+        if self.review and not self.review.ok:
+            # "claude says error" reads like a verdict. It is the absence of
+            # one, and the whole point of the pairing is that somebody other
+            # than the author looked.
+            parts.append(f"NOT reviewed by {self.review.agent}: {self.review.error}")
+        elif self.review:
             parts.append(f"{self.review.agent} says {self.review.verdict}")
         return f"{self.repository_id} #{self.recommendation_id}: {', '.join(parts)}"
 
@@ -274,6 +286,18 @@ async def implement_async(
     except Exception as exc:  # noqa: BLE001
         run.error = str(exc)
         return run
+
+    # Said before the work, not after. An unattended run that discovers this
+    # at the end has already spent an implementation to learn that the second
+    # half of "one model writes, the other checks" was never going to happen.
+    # It does not stop the run -- an unreviewed diff on a branch is still worth
+    # having, and nothing merges without a person -- but it must not be quiet.
+    unavailable = reviewer_unavailable(run.pairing.reviewer)
+    if unavailable:
+        logger.warning(
+            f"NO INDEPENDENT REVIEW: {run.pairing.reviewer} cannot review this "
+            f"implementation. {unavailable}"
+        )
 
     implementation_id = record_implementation(
         recommendation_id=recommendation_id,

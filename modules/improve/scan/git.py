@@ -142,7 +142,12 @@ class GitRepository:
             return raw
         return raw[:max_chars] + f"\n... [truncated at {max_chars} characters]"
 
-    def grep(self, patterns: Sequence[str], max_results: int = 500) -> List[str]:
+    def grep(
+        self,
+        patterns: Sequence[str],
+        max_results: int = 500,
+        exclude: Optional[str] = None,
+    ) -> List[str]:
         """`git grep` over tracked files only.
 
         Tracked-only is the point: it skips node_modules, .venv and build
@@ -156,6 +161,11 @@ class GitRepository:
         """
         args = ["grep", "-n", "-I", "--no-color", "-E"]
         args.append("|".join(patterns))
+        if exclude:
+            # git's own exclusion, so it stays tracked-only. `--` separates the
+            # pattern from the pathspec, and `:(exclude)` is a pathspec magic
+            # word rather than a shell glob, so nothing is expanded on the way.
+            args.extend(["--", f":(exclude){exclude}"])
         return self._lines(*args, check=False)[:max_results]
 
     def state(self, commit_limit: int = 20) -> GitState:

@@ -234,3 +234,28 @@ def test_a_scan_is_never_adverse(repository):
     scan_repository(repository, summarize=False)
 
     assert not timeline()[0].adverse
+
+
+def test_two_events_in_the_same_millisecond_have_a_defined_order(repository):
+    """A stable sort on a tie falls back to collection order, which put the
+    earlier pipeline stage first -- so the timeline said research happened
+    before the scan that preceded it, on a fast enough machine."""
+    from modules.improve.history import RESEARCH, SCAN, Event, timeline
+    from modules.improve import history as history_module
+
+    same = "2026-09-05T02:15:25.601+00:00"
+
+    def scans(conn, repository_id):
+        return [Event(kind=SCAN, at=same, repository_id="sample", summary="scan")]
+
+    def research(conn, repository_id):
+        return [Event(kind=RESEARCH, at=same, repository_id="sample", summary="doc")]
+
+    original = dict(history_module._SOURCES)
+    history_module._SOURCES.update({SCAN: scans, RESEARCH: research})
+    try:
+        events = timeline(kinds=[SCAN, RESEARCH])
+    finally:
+        history_module._SOURCES.update(original)
+
+    assert [e.kind for e in events] == [RESEARCH, SCAN]

@@ -40,6 +40,7 @@ EXPECTED_TOOLS = {
     "repo.find_todos": ["repository_id"],
     "repo.get_dependencies": ["repository_id"],
     "repo.get_history": ["repository_id"],
+    "repo.read_file": ["path", "repository_id"],
     "repo.search": ["pattern", "repository_id"],
     "resource.list": [],
     "resource.read": ["uri"],

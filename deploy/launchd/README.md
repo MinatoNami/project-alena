@@ -11,12 +11,12 @@ it is a decision to make deliberately -- nothing installs itself.
 
 ## Two kinds of agent
 
-Three of these are **jobs**: they run on a timer and exit. One is a
-**service**: it starts at load and stays up.
+One of these is a **job**: it runs on a timer and exits. One is a **service**:
+it starts at load and stays up.
 
-| | Jobs | Service |
+| | Job | Service |
 |---|---|---|
-| | scan, review, recommend | dashboard |
+| | cycle | dashboard |
 | Shape | `StartCalendarInterval`, `RunAtLoad: false` | `KeepAlive`, `RunAtLoad: true` |
 | Loading it | arms the timer | starts it |
 
@@ -27,34 +27,49 @@ first time it exits.
 
 ## The cadence
 
-Matching the spec's weekly workflow:
+One pass a night, in order:
 
 | When | Command | What it costs |
 |---|---|---|
 | Always | dashboard on http://127.0.0.1:9100 | one idle Python process |
-| Nightly 02:00 | `scan --all` | local only; unchanged repositories skip the model |
-| Wednesday | *(ChatGPT Work's own schedule writes research)* | — |
-| Wednesday 22:00 | `ingest-research <repo> --from-dir ~/alena-research` | local only |
-| Wednesday 22:30 | `review --all` | one Codex call per new observation |
-| Thursday 02:00 | `review --all --agent claude` | one routine call per escalated candidate |
-| Thursday 07:00 | `recommend --all` then `portfolio` | local only |
+| Nightly 02:00 | `cycle --all` | one Codex call per new observation; everything else local |
 
-The Claude step is the expensive one. Run it with `--dry-run` first for a week
-and read the escalation rate before letting it call anything:
+`cycle` is scan → ingest whatever research has been dropped → review what is
+new → score it → refresh the portfolio. It stops at the approval gate.
+
+This used to be three jobs on three different days, which had two problems. A
+research document dropped on a Thursday waited until the following Wednesday
+to be reviewed, and the review of a repository was never part of the same run
+as the scan that found it, so reading one log never told you what happened.
+
+**Nightly is not more expensive than weekly was.** An unchanged repository is
+skipped without reaching the model, and review costs one Codex call per *new*
+observation. The bill follows how much has actually changed, not how often the
+job runs. A quiet night is a scan, no new observations, and an exit.
+
+### The Claude escalation stays off the timer
+
+`review --all --agent claude` is the expensive reviewer, and nothing schedules
+it — `test_nothing_schedules_a_live_claude_escalation` fails the build if
+anything ever does. Run it with `--dry-run` for a while and read the escalation
+rate before letting it call anything:
 
 ```bash
 scripts/alena_improve.sh review --all --agent claude --dry-run
 ```
+
+When you do want it on a timer, add it as a second job rather than to this one,
+so its cost stays legible and can be turned off by itself.
 
 ## Installing one
 
 Substitute the paths, then load it:
 
 ```bash
-sed "s|/Users/YOU|$HOME|g" deploy/launchd/local.alena.scan.plist \
-  > ~/Library/LaunchAgents/local.alena.scan.plist
+sed "s|/Users/YOU|$HOME|g" deploy/launchd/local.alena.cycle.plist \
+  > ~/Library/LaunchAgents/local.alena.cycle.plist
 mkdir -p ~/.alena/logs
-launchctl load ~/Library/LaunchAgents/local.alena.scan.plist
+launchctl load ~/Library/LaunchAgents/local.alena.cycle.plist
 ```
 
 Run it once by hand before trusting the timer. `kickstart -k` starts it now,
@@ -62,16 +77,16 @@ which is the only way to find out whether it works in launchd's environment
 rather than in your shell's:
 
 ```bash
-launchctl kickstart -k "gui/$(id -u)/local.alena.scan"
-launchctl print "gui/$(id -u)/local.alena.scan" | grep -E "state|last exit"
-tail -f ~/.alena/logs/scan.log
+launchctl kickstart -k "gui/$(id -u)/local.alena.cycle"
+launchctl print "gui/$(id -u)/local.alena.cycle" | grep -E "state|last exit"
+tail -f ~/.alena/logs/cycle.log
 ```
 
 To check on it, and to stop it:
 
 ```bash
 launchctl list | grep alena
-launchctl unload ~/Library/LaunchAgents/local.alena.scan.plist
+launchctl unload ~/Library/LaunchAgents/local.alena.cycle.plist
 ```
 
 ### The environment a job actually gets
@@ -79,8 +94,8 @@ launchctl unload ~/Library/LaunchAgents/local.alena.scan.plist
 launchd starts a job with a bare `PATH` -- no login shell, no profile, none of
 what your terminal has. `scripts/alena_improve.sh` therefore prepends
 `~/.local/bin`, `/opt/homebrew/bin` and `/usr/local/bin` itself. Without that
-a scheduled `review` cannot find the Codex CLI, which npm installs to
-`~/.local/bin`, and it fails at 22:30 on a Wednesday with nobody watching.
+the scheduled cycle cannot find the Codex CLI, which npm installs to
+`~/.local/bin`, and it fails at 02:00 with nobody watching.
 
 `ALENA_WORKSPACE_ROOT` is set per job in `EnvironmentVariables` rather than in
 a `.env`, so installing a schedule does not quietly change what an interactive
@@ -114,18 +129,28 @@ cd modules/improve/dashboard && npm run generate
 launchctl kickstart -k "gui/$(id -u)/local.alena.dashboard"
 ```
 
-## Research is still a manual step
+## Research: drop a file, the cycle finds it
 
-There is no template for `ingest-research`. It takes one repository at a time,
-and the ChatGPT Work output arrives however you fetch it, so a timer would be
-guessing at both. The weekly rhythm is:
+The nightly job reads `$ALENA_RESEARCH_DIR/<repository>/` (default
+`~/alena-research/`), one directory per repository id. Anything left there is
+ingested on the next pass, which is why the drop point is named by repository:
+a document cannot be ingested against the wrong one by being in the wrong
+place.
+
+```bash
+mkdir -p ~/alena-research/luma-index
+cp ~/Downloads/luma-2026-09-10.md ~/alena-research/luma-index/
+```
+
+For a one-off against an explicit path, `ingest-research` still takes one
+directly:
 
 ```bash
 scripts/alena_improve.sh ingest-research luma-index ~/Downloads/luma-2026-09-10.md
 ```
 
-Until something is ingested, the Wednesday and Thursday jobs are correct
-no-ops -- they run, find no new observations, and exit zero.
+With nothing dropped, the nightly job is a correct no-op: it scans, finds no
+new observations, and exits zero.
 
 ## Before you turn any of it on
 
