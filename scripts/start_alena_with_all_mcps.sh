@@ -2,6 +2,14 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# The interpreter to use. `python` does not exist on macOS outside an activated
+# virtualenv -- which is how a scheduled Codex review recorded
+# `FileNotFoundError: [Errno 2] No such file or directory: 'python'` as its
+# assessment. `alena_improve.sh` and the dashboard script already resolved
+# this; these did not.
+PYTHON="$ROOT_DIR/.venv/bin/python"
+[[ -x "$PYTHON" ]] || PYTHON="$(command -v python3 || command -v python)"
 CODEX_MCP_DIR="$ROOT_DIR/modules/mcp/codex-server"
 GOOGLE_CALENDAR_MCP_DIR="$ROOT_DIR/modules/mcp/google-calendar"
 
@@ -36,7 +44,7 @@ echo "Starting Codex MCP server..."
 # Start Codex MCP server in background
 (
   cd "$CODEX_MCP_DIR"
-  python -m app.main
+  "$PYTHON" -m app.main
 ) &
 CODEX_MCP_PID=$!
 echo "Codex MCP server started with PID: $CODEX_MCP_PID"
@@ -49,7 +57,7 @@ echo "Starting Google Calendar MCP server..."
   export GOOGLE_TOKEN_PATH
   export CALENDAR_ID
   export CALENDAR_TIMEZONE
-  python -m app.main
+  "$PYTHON" -m app.main
 ) &
 GOOGLE_CALENDAR_MCP_PID=$!
 echo "Google Calendar MCP server started with PID: $GOOGLE_CALENDAR_MCP_PID"
@@ -60,4 +68,4 @@ sleep 2
 echo "Starting ALENA..."
 # Launch ALENA (foreground)
 cd "$ROOT_DIR"
-python alena.py
+"$PYTHON" alena.py

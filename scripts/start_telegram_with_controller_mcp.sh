@@ -3,6 +3,14 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+# The interpreter to use. `python` does not exist on macOS outside an activated
+# virtualenv -- which is how a scheduled Codex review recorded
+# `FileNotFoundError: [Errno 2] No such file or directory: 'python'` as its
+# assessment. `alena_improve.sh` and the dashboard script already resolved
+# this; these did not.
+PYTHON="$ROOT_DIR/.venv/bin/python"
+[[ -x "$PYTHON" ]] || PYTHON="$(command -v python3 || command -v python)"
+
 kill_port_9000() {
   local pids
   pids=$(lsof -ti tcp:9000 2>/dev/null || true)
@@ -36,4 +44,4 @@ cleanup() {
 }
 trap cleanup EXIT
 
-python -m modules.telegram.bot
+"$PYTHON" -m modules.telegram.bot

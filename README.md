@@ -157,7 +157,7 @@ an agent searches before proposing an idea can say why it was turned down.
 
 ## Tools
 
-Twenty-two tools across three MCP servers, plus five readable resources. Every
+Twenty-three tools across three MCP servers, plus five readable resources. Every
 one is declared in [`config/tool_policy.yaml`](config/tool_policy.yaml) with a
 side effect and the agents allowed to call it; **a tool that is not declared
 cannot be called, even if a server advertises it.**
@@ -166,7 +166,7 @@ cannot be called, even if a server advertises it.**
 |---|---|
 | codex-server | `codex_generate` `codex_plan` `codex_analyze` `codex_summarize` `codex_doc_outline` `codex_test_plan` (read-only) · `codex_edit` `codex_refactor` (repository write) |
 | google-calendar | `google_list_events` (read) · `google_create_event` `google_update_event` (remote write) · `google_delete_event` (destructive) |
-| alena-core | `repo.search` `repo.find_todos` `repo.get_dependencies` `repo.get_history` `memory.search` `recommendation.search` `portfolio.search_capability` `portfolio.dependency_divergence` `resource.list` `resource.read` — all read-only |
+| alena-core | `repo.search` `repo.read_file` `repo.find_todos` `repo.get_dependencies` `repo.get_history` `memory.search` `recommendation.search` `portfolio.search_capability` `portfolio.dependency_divergence` `resource.list` `resource.read` — all read-only |
 
 alena-core also exposes `alena://repositories`, `alena://repositories/{id}/profile`,
 `.../architecture`, `.../recommendations` and `alena://portfolio/capabilities`
@@ -220,7 +220,7 @@ All services read the repo-root `.env`.
 | `bash scripts/start_telegram_with_controller_mcp.sh` | Telegram bot wired to the controller |
 | `bash scripts/start_alena_core_mcp.sh` | alena-core over stdio, for an external MCP client |
 | `bash scripts/start_alena_dashboard.sh` | The improvement dashboard |
-| `bash scripts/alena_improve.sh <command>` | The improvement CLI — `scan`, `review`, `recommend`, `pending`, `decide`, `implement`, `portfolio`, `tools`, `status`, and more |
+| `bash scripts/alena_improve.sh <command>` | The improvement CLI — `cycle`, `scan`, `investigate`, `review`, `recommend`, `pending`, `decide`, `implement`, `agents`, `portfolio`, `tools`, `status`, and more |
 
 The voice backend imports `modules/llm` and `modules/stt` from the repo root,
 so run it through its script or set `PYTHONPATH` to the repo root yourself.

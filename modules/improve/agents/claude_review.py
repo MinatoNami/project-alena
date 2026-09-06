@@ -53,6 +53,7 @@ from .prompting import (
     VERDICT_SCHEMA,
     observation_block,
     preamble_for,
+    citation_block,
     near_duplicate_block,
     priors_block,
 )
@@ -160,7 +161,7 @@ def build_prompt(
 {preamble_for(observation.get("source"))}
 
 Do not modify anything. This is a read-only review.
-{priors_block(priors)}{near_duplicate_block(observation)}{codex_block}
+{priors_block(priors)}{citation_block(observation)}{near_duplicate_block(observation)}{codex_block}
 {f"Repository context:{chr(10)}{context}{chr(10)}" if context else ""}
 {observation_block(observation)}
 

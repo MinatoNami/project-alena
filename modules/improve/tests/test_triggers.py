@@ -205,3 +205,102 @@ def test_security_sensitive_is_read_as_a_tri_state(stored, expected):
         [{"agent": "codex", "verdict": "supported", "security_sensitive": stored}],
     )
     assert candidate.security_sensitive is expected
+
+
+# -- what a dry run against real data changed -------------------------------
+
+
+def test_a_confident_rejection_is_not_escalated_on_the_subject_alone():
+    """Three of six escalations in the first dry run were for proposals Codex
+    had rejected at 0.94-0.99 confidence, two of them worth 0.05. The security
+    flag reached the reasons before the rejection was considered."""
+    decision = should_escalate(
+        Candidate(1, "cache the mosaics", verdict="rejected", confidence=0.99,
+                  score=0.05, security_sensitive=True)
+    )
+
+    assert not decision.escalate
+
+
+def test_an_unconfident_rejection_still_escalates():
+    """The case the old behaviour protected, covered by the confidence floor
+    instead -- and covered better, because it does not need the subject to be
+    security-adjacent to fire."""
+    decision = should_escalate(
+        Candidate(2, "maybe", verdict="rejected", confidence=0.4,
+                  security_sensitive=True)
+    )
+
+    assert decision.escalate
+    assert "low reviewer confidence" in decision.reason
+
+
+def test_a_supported_security_item_still_escalates():
+    """The flag is not disabled -- it is ordered behind the rejection."""
+    decision = should_escalate(
+        Candidate(3, "upgrade the framework", verdict="supported",
+                  confidence=0.95, security_sensitive=True)
+    )
+
+    assert decision.escalate
+    assert "security-sensitive" in decision.reason
+
+
+def test_the_domain_fallback_is_gated_the_same_way():
+    """A rejected candidate in a security product should not escalate on the
+    repository's tags either; the reasoning is identical."""
+    rejected = should_escalate(
+        Candidate(4, "no", verdict="rejected", confidence=0.98,
+                  repository_tags=["security"])
+    )
+    supported = should_escalate(
+        Candidate(5, "yes", verdict="supported", confidence=0.98,
+                  repository_tags=["security"])
+    )
+
+    assert not rejected.escalate
+    assert supported.escalate
+
+
+def test_no_subject_matter_flag_escalates_a_confident_rejection():
+    """Security, architecture and effort are facts about the work. A confident
+    no is about the review, and only the review can reopen it."""
+    for flags in (
+        {"security_sensitive": True},
+        {"requires_architecture_review": True},
+        {"effort": "LARGE"},
+        {"security_sensitive": True, "requires_architecture_review": True,
+         "effort": "LARGE"},
+    ):
+        decision = should_escalate(
+            Candidate(9, "no", verdict="rejected", confidence=0.99,
+                      score=0.05, **flags)
+        )
+        assert not decision.escalate, f"{flags} escalated a confident rejection"
+
+
+def test_the_review_itself_still_reopens_a_rejection():
+    """Both remaining routes, neither of which depends on the subject."""
+    unsure = should_escalate(
+        Candidate(10, "maybe", verdict="rejected", confidence=0.3)
+    )
+    contested = should_escalate(
+        Candidate(11, "contested", verdict="rejected", confidence=0.99,
+                  disagreement=True)
+    )
+
+    assert unsure.escalate and "low reviewer confidence" in unsure.reason
+    assert contested.escalate and "disagree" in contested.reason
+
+
+def test_an_accepted_candidate_is_unaffected():
+    """The flags still do their job on everything that was not rejected."""
+    decision = should_escalate(
+        Candidate(12, "big architectural job", verdict="supported",
+                  confidence=0.95, requires_architecture_review=True,
+                  effort="LARGE")
+    )
+
+    assert decision.escalate
+    assert "changes architecture" in decision.reason
+    assert "effort LARGE" in decision.reason

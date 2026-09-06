@@ -83,9 +83,25 @@ def should_escalate(
     if candidate.verdict is None:
         return Decision(False, ["no engineering review yet"])
 
-    # An idea the first reviewer rejected is not escalated on score alone --
-    # but it is escalated if the rejection was unconfident or the subject is
-    # one where being wrong is expensive.
+    # A rejection is escalated on what the *review* looks like, never on what
+    # the subject is. Reviewers disagreeing, or one of them unsure, is a reason
+    # to ask somebody else. "This is about security", "this is architectural",
+    # "this is a big job" are facts about the work, and they do not become
+    # reasons to re-examine a confident no.
+    #
+    # This used to be the other way round, and a dry run against real data
+    # showed the cost: six escalations across the portfolio, three of them
+    # proposals Codex had rejected at 0.94-0.99 confidence, two scored 0.05.
+    # One item was rejected at 0.99, scored 0.05, and escalated anyway because
+    # a reviewer had marked it architectural.
+    #
+    # The case the old behaviour protected -- a rejection that might be wrong
+    # about something expensive -- is still covered, and covered better, by the
+    # confidence floor: an *unconfident* rejection escalates on its own,
+    # whatever the subject, without needing the subject to be interesting.
+    # What is given up is the confidently-rejected case, which is precisely
+    # where there is least to second-guess.
+    rejected = candidate.verdict == "rejected"
     reasons: List[str] = []
 
     if candidate.disagreement:
@@ -94,12 +110,12 @@ def should_escalate(
     if candidate.confidence is not None and candidate.confidence < confidence_floor:
         reasons.append(f"low reviewer confidence ({candidate.confidence:.2f})")
 
-    if candidate.requires_architecture_review:
+    if candidate.requires_architecture_review and not rejected:
         reasons.append("changes architecture")
 
-    if candidate.security_sensitive:
+    if candidate.security_sensitive and not rejected:
         reasons.append("security-sensitive")
-    elif candidate.security_sensitive is None and (
+    elif not rejected and candidate.security_sensitive is None and (
         SECURITY_TAGS & {t.lower() for t in candidate.repository_tags}
     ):
         # A reviewer that looked and said "not security-sensitive" is a better
@@ -108,7 +124,7 @@ def should_escalate(
         # cost control this module exists for is gone for that repository.
         reasons.append("security-sensitive by repository domain")
 
-    if candidate.effort and candidate.effort.upper() in LARGE_EFFORTS:
+    if candidate.effort and candidate.effort.upper() in LARGE_EFFORTS and not rejected:
         reasons.append(f"effort {candidate.effort}")
 
     if (

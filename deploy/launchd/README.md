@@ -129,6 +129,29 @@ cd modules/improve/dashboard && npm run generate
 launchctl kickstart -k "gui/$(id -u)/local.alena.dashboard"
 ```
 
+## The Claude reviewer
+
+`review --agent claude` and the action agent's cross-review both post to
+`CLAUDE_ROUTINE_URL`. With it unset, the independent half of "one model writes,
+the other checks" does not happen -- it says so now rather than failing quietly,
+but saying so is not reviewing.
+
+`local.alena.routine.plist` serves that endpoint locally, using the `claude`
+CLI already on the machine. A service like the dashboard, not a job: it has to
+be up before a review needs it.
+
+```bash
+sed "s|/Users/YOU|$HOME|g" deploy/launchd/local.alena.routine.plist \
+  > ~/Library/LaunchAgents/local.alena.routine.plist
+launchctl load ~/Library/LaunchAgents/local.alena.routine.plist
+alena-improve check-routine
+```
+
+It binds loopback only, refuses to start otherwise, and runs the CLI with tools
+denied in an empty directory -- a reviewer is sent a diff as text and should not
+also be handed a working tree. `modules/improve/agents/routine_shim.py` says
+why for each.
+
 ## Research: drop a file, the cycle finds it
 
 The nightly job reads `$ALENA_RESEARCH_DIR/<repository>/` (default

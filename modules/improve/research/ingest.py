@@ -26,6 +26,7 @@ from ..persistence import (
 )
 from ..recommend.dedup import check, embed_text, pack_embedding
 from ..registry import Repository
+from ..text import unverifiable_citations
 from .parse import parse_research
 
 RESEARCH_SUFFIXES = (".md", ".markdown")
@@ -42,6 +43,10 @@ class IngestResult:
     # Accepted, but close enough to something already proposed that the
     # reviewer is asked about it. A subset of `accepted`, not a rejection.
     flagged: List[str] = field(default_factory=list)
+    # Accepted, but citing addresses that cannot resolve. Also a subset of
+    # `accepted`: an unfilled citation says nothing about whether the point is
+    # right, so it is surfaced rather than used to refuse the observation.
+    unverifiable: List[str] = field(default_factory=list)
     error: Optional[str] = None
 
     @property
@@ -54,6 +59,8 @@ class IngestResult:
         if not self.created:
             return f"{self.repository_id}: already ingested, nothing new"
         parts = [f"{len(self.accepted)} observation(s)"]
+        if self.unverifiable:
+            parts.append(f"{len(self.unverifiable)} with unverifiable citations")
         if self.duplicates:
             parts.append(f"{len(self.duplicates)} duplicate(s) skipped")
         return f"{self.repository_id}: {', '.join(parts)}"
@@ -160,6 +167,17 @@ def ingest_text(
                 )
                 result.flagged.append(observation.title)
             result.accepted.append(observation.title)
+            # Said at ingest as well as at review: a research document whose
+            # citations are placeholders is worth knowing about while it is
+            # arriving, not only once a reviewer reads it.
+            unverifiable = unverifiable_citations(observation.evidence)
+            if unverifiable:
+                result.unverifiable.append(observation.title)
+                logger.warning(
+                    f"{repository.id}: '{observation.title}' cites "
+                    f"{len(unverifiable)} address(es) that cannot resolve: "
+                    f"{', '.join(unverifiable[:3])}"
+                )
 
     if not result.embeddings_used and parsed.observations:
         logger.warning(

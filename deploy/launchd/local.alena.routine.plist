@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The local Claude routine endpoint.
+
+  A service, like the dashboard: it starts at load and stays up. ALENA's
+  independent reviewer posts to it, so it has to be running before a review
+  that escalates, not started on demand.
+
+  It binds loopback only and runs the `claude` CLI with tools denied, in an
+  empty directory. See modules/improve/agents/routine_shim.py for why each of
+  those matters.
+
+  Set CLAUDE_ROUTINE_URL=http://127.0.0.1:9200/review in .env, or the reviewer
+  still has nowhere to send.
+
+  Replace /Users/YOU with your path before installing.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>local.alena.routine</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/YOU/git-repos/project-alena/scripts/start_claude_routine_shim.sh</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+
+  <key>StandardOutPath</key>
+  <string>/Users/YOU/.alena/logs/routine.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/YOU/.alena/logs/routine.log</string>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/YOU/git-repos/project-alena</string>
+</dict>
+</plist>

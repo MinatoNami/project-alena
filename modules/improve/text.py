@@ -76,3 +76,44 @@ WHERE_IT_STANDS = {
 
 def where_it_stands(status: str) -> str:
     return WHERE_IT_STANDS.get(status, f"already proposed ({status})")
+
+
+# --- citations -------------------------------------------------------------
+#
+# Reserved by RFC 2606 and RFC 6761 precisely so that nobody can register them:
+# a URL on one of these cannot resolve to a source, ever. Anything citing one
+# is either a template nobody filled in or a fabrication.
+_RESERVED_HOSTS = ("example.com", "example.net", "example.org", "localhost")
+_RESERVED_SUFFIXES = (".example", ".test", ".invalid", ".localhost")
+# Templates people leave behind. Narrower and more literal than the reserved
+# list on purpose -- a real page can be called anything, and guessing at
+# "looks fake" would start rejecting genuine sources.
+_PLACEHOLDER_MARKERS = ("your-domain", "yourdomain", "example.url", "<url>", "todo", "tbd")
+
+_URL = re.compile(r"https?://[^\s<>\"')\]]+", re.IGNORECASE)
+
+
+def unverifiable_citations(evidence: str | None) -> list[str]:
+    """URLs in `evidence` that cannot lead to a source, in the order cited.
+
+    Not a judgement about the claim. A real finding can arrive with a citation
+    somebody templated and never filled in; the point is that the reviewer
+    should not read such a URL as support, and until now nothing said so.
+
+    ALENA's own research backlog carried four of these --
+    `https://example.com/nuxt-release-policy` and three more on a single
+    observation -- through ingest and a full Codex review without comment. The
+    second reviewer noticed on the first day it ran.
+    """
+    found = []
+    for url in _URL.findall(evidence or ""):
+        lowered = url.lower()
+        host = lowered.split("://", 1)[-1].split("/", 1)[0].split(":")[0]
+        if (
+            host in _RESERVED_HOSTS
+            or any(host.endswith(f".{h}") for h in _RESERVED_HOSTS)
+            or any(host.endswith(s) for s in _RESERVED_SUFFIXES)
+            or any(marker in lowered for marker in _PLACEHOLDER_MARKERS)
+        ):
+            found.append(url)
+    return found
