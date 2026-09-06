@@ -77,3 +77,58 @@ def test_stopwords_do_not_change_a_title():
 def test_a_title_of_only_stopwords_keeps_its_words():
     """Dropping everything would make every such title identical."""
     assert normalize_title("It is what it is") != ""
+
+
+# -- citations that cannot lead anywhere ------------------------------------
+
+
+def test_a_reserved_domain_is_unverifiable():
+    """RFC 2606 reserves these so nobody can register them. A URL on one
+    cannot resolve to a source -- it is a template or an invention.
+
+    ALENA's own backlog carried four of these through ingest and a full Codex
+    review without comment."""
+    from modules.improve.text import unverifiable_citations
+
+    assert unverifiable_citations("https://example.com/nuxt-release-policy") == [
+        "https://example.com/nuxt-release-policy"
+    ]
+    assert len(
+        unverifiable_citations(
+            "https://example.com/a https://example.com/b https://example.com/c"
+        )
+    ) == 3
+
+
+def test_a_real_source_is_left_alone():
+    """The cost of a false positive is telling a reviewer to distrust good
+    evidence, so the check stays literal rather than guessing at 'looks fake'."""
+    from modules.improve.text import unverifiable_citations
+
+    assert unverifiable_citations("https://www.djangoproject.com/download/") == []
+    assert unverifiable_citations("https://nuxt.com/blog/v4") == []
+    assert unverifiable_citations("see the changelog, no url at all") == []
+    assert unverifiable_citations(None) == []
+
+
+def test_subdomains_and_reserved_tlds_count_too():
+    from modules.improve.text import unverifiable_citations
+
+    found = unverifiable_citations(
+        "https://docs.example.com/x http://localhost:8000/y https://a.invalid/z"
+    )
+
+    assert len(found) == 3
+
+
+def test_the_reviewer_is_told_what_cannot_be_checked_and_what_that_means():
+    """An unverifiable citation makes a claim unsupported, not false. The block
+    has to say that, or it becomes a reason to reject a real finding."""
+    from modules.improve.agents.prompting import citation_block
+
+    block = citation_block({"evidence": "https://example.com/policy"})
+
+    assert "https://example.com/policy" in block
+    assert "not as false" in block or "rather than as false" in block
+    assert citation_block({"evidence": "https://nuxt.com/blog/v4"}) == ""
+    assert citation_block({}) == ""

@@ -107,6 +107,37 @@ def observation_block(observation: Dict[str, Any]) -> str:
     )
 
 
+def citation_block(observation: Dict[str, Any]) -> str:
+    """Say when the cited evidence cannot lead anywhere.
+
+    A URL on a reserved domain cannot resolve to a source -- that is what the
+    reservation is for -- so it is either an unfilled template or an invention.
+    Either way the reviewer should not read it as support, and until this
+    existed nothing said so: four such citations went through ingest and a full
+    Codex review without comment.
+
+    Deliberately narrow about what it concludes. An unverifiable citation makes
+    a claim *unsupported*, not false, and a real finding can arrive with a
+    templated citation attached. So the reviewer is told what cannot be checked
+    and asked to judge the claim on everything else, rather than handed a
+    reason to reject.
+    """
+    from ..text import unverifiable_citations
+
+    found = unverifiable_citations(observation.get("evidence"))
+    if not found:
+        return ""
+    listed = ", ".join(strip_delimiters(url) for url in found[:5])
+    return (
+        "\nThe evidence cited here cannot be checked. These are reserved or "
+        f"placeholder addresses that cannot resolve to a source: {listed}\n"
+        "Treat the claim as carrying no citation rather than as false -- an "
+        "unfilled template says nothing about whether the underlying point is "
+        "right. Judge it on what can be verified from the repository itself, "
+        "and say in your assessment that the evidence was unverifiable.\n"
+    )
+
+
 def near_duplicate_block(observation: Dict[str, Any]) -> str:
     """A similarity score that was not decisive, handed over as a question.
 
