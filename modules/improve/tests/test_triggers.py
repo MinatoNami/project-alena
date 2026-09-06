@@ -205,3 +205,58 @@ def test_security_sensitive_is_read_as_a_tri_state(stored, expected):
         [{"agent": "codex", "verdict": "supported", "security_sensitive": stored}],
     )
     assert candidate.security_sensitive is expected
+
+
+# -- what a dry run against real data changed -------------------------------
+
+
+def test_a_confident_rejection_is_not_escalated_on_the_subject_alone():
+    """Three of six escalations in the first dry run were for proposals Codex
+    had rejected at 0.94-0.99 confidence, two of them worth 0.05. The security
+    flag reached the reasons before the rejection was considered."""
+    decision = should_escalate(
+        Candidate(1, "cache the mosaics", verdict="rejected", confidence=0.99,
+                  score=0.05, security_sensitive=True)
+    )
+
+    assert not decision.escalate
+
+
+def test_an_unconfident_rejection_still_escalates():
+    """The case the old behaviour protected, covered by the confidence floor
+    instead -- and covered better, because it does not need the subject to be
+    security-adjacent to fire."""
+    decision = should_escalate(
+        Candidate(2, "maybe", verdict="rejected", confidence=0.4,
+                  security_sensitive=True)
+    )
+
+    assert decision.escalate
+    assert "low reviewer confidence" in decision.reason
+
+
+def test_a_supported_security_item_still_escalates():
+    """The flag is not disabled -- it is ordered behind the rejection."""
+    decision = should_escalate(
+        Candidate(3, "upgrade the framework", verdict="supported",
+                  confidence=0.95, security_sensitive=True)
+    )
+
+    assert decision.escalate
+    assert "security-sensitive" in decision.reason
+
+
+def test_the_domain_fallback_is_gated_the_same_way():
+    """A rejected candidate in a security product should not escalate on the
+    repository's tags either; the reasoning is identical."""
+    rejected = should_escalate(
+        Candidate(4, "no", verdict="rejected", confidence=0.98,
+                  repository_tags=["security"])
+    )
+    supported = should_escalate(
+        Candidate(5, "yes", verdict="supported", confidence=0.98,
+                  repository_tags=["security"])
+    )
+
+    assert not rejected.escalate
+    assert supported.escalate

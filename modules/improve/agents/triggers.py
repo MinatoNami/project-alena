@@ -83,9 +83,22 @@ def should_escalate(
     if candidate.verdict is None:
         return Decision(False, ["no engineering review yet"])
 
-    # An idea the first reviewer rejected is not escalated on score alone --
-    # but it is escalated if the rejection was unconfident or the subject is
-    # one where being wrong is expensive.
+    # An idea the first reviewer rejected is not escalated on score alone, nor
+    # on the subject being one where being wrong is expensive.
+    #
+    # That second half used to be the other way round, and a dry run against
+    # real data showed what it cost: three of six escalations were for
+    # proposals Codex had rejected at 0.94-0.99 confidence, two of them worth
+    # 0.05. The security flag reached `reasons` before the rejection was
+    # considered at all, so a confident no was overridden by the subject
+    # matter.
+    #
+    # The case the old behaviour was protecting -- a rejection that might be
+    # wrong about something expensive -- is already covered, and better, by
+    # the confidence floor below: an *unconfident* rejection escalates on its
+    # own, whatever the subject. What is lost is only the confidently-rejected
+    # case, which is the one where there is least to second-guess.
+    rejected = candidate.verdict == "rejected"
     reasons: List[str] = []
 
     if candidate.disagreement:
@@ -97,9 +110,9 @@ def should_escalate(
     if candidate.requires_architecture_review:
         reasons.append("changes architecture")
 
-    if candidate.security_sensitive:
+    if candidate.security_sensitive and not rejected:
         reasons.append("security-sensitive")
-    elif candidate.security_sensitive is None and (
+    elif not rejected and candidate.security_sensitive is None and (
         SECURITY_TAGS & {t.lower() for t in candidate.repository_tags}
     ):
         # A reviewer that looked and said "not security-sensitive" is a better
