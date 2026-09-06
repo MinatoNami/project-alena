@@ -12,10 +12,15 @@ PYTHON="$ROOT_DIR/.venv/bin/python"
 [[ -x "$PYTHON" ]] || PYTHON="$(command -v python3 || command -v python)"
 
 if [[ -f "$ROOT_DIR/.env" ]]; then
+  # What the caller exported wins over the file: an empty line in
+  # .env should not silently override it. See scripts/alena_improve.sh.
+  _env_before="$(export -p)"
   set -a
   # shellcheck disable=SC1090
   source "$ROOT_DIR/.env"
   set +a
+  eval "$_env_before"
+  unset _env_before
 fi
 
 "$PYTHON" -m modules.telegram.bot

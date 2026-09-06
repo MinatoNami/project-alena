@@ -8,10 +8,15 @@ ROOT_DIR="$(cd "$BACKEND_DIR/../../.." && pwd)"
 cd "$BACKEND_DIR"
 
 if [[ -f "$ROOT_DIR/.env" ]]; then
+  # What the caller exported wins over the file: an empty line in
+  # .env should not silently override it. See scripts/alena_improve.sh.
+  _env_before="$(export -p)"
   set -a
   # shellcheck disable=SC1090
   source "$ROOT_DIR/.env"
   set +a
+  eval "$_env_before"
+  unset _env_before
 fi
 
 # The backend imports modules/llm and modules/stt from the repo root, so the

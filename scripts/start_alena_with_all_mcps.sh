@@ -14,10 +14,15 @@ CODEX_MCP_DIR="$ROOT_DIR/modules/mcp/codex-server"
 GOOGLE_CALENDAR_MCP_DIR="$ROOT_DIR/modules/mcp/google-calendar"
 
 if [[ -f "$ROOT_DIR/.env" ]]; then
+  # What the caller exported wins over the file: an empty line in
+  # .env should not silently override it. See scripts/alena_improve.sh.
+  _env_before="$(export -p)"
   set -a
   # shellcheck disable=SC1090
   source "$ROOT_DIR/.env"
   set +a
+  eval "$_env_before"
+  unset _env_before
   
   # Convert relative paths to absolute paths
   if [[ -n "${GOOGLE_CREDENTIALS_PATH:-}" && "${GOOGLE_CREDENTIALS_PATH}" != /* ]]; then
