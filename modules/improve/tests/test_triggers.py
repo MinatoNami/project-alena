@@ -260,3 +260,47 @@ def test_the_domain_fallback_is_gated_the_same_way():
 
     assert not rejected.escalate
     assert supported.escalate
+
+
+def test_no_subject_matter_flag_escalates_a_confident_rejection():
+    """Security, architecture and effort are facts about the work. A confident
+    no is about the review, and only the review can reopen it."""
+    for flags in (
+        {"security_sensitive": True},
+        {"requires_architecture_review": True},
+        {"effort": "LARGE"},
+        {"security_sensitive": True, "requires_architecture_review": True,
+         "effort": "LARGE"},
+    ):
+        decision = should_escalate(
+            Candidate(9, "no", verdict="rejected", confidence=0.99,
+                      score=0.05, **flags)
+        )
+        assert not decision.escalate, f"{flags} escalated a confident rejection"
+
+
+def test_the_review_itself_still_reopens_a_rejection():
+    """Both remaining routes, neither of which depends on the subject."""
+    unsure = should_escalate(
+        Candidate(10, "maybe", verdict="rejected", confidence=0.3)
+    )
+    contested = should_escalate(
+        Candidate(11, "contested", verdict="rejected", confidence=0.99,
+                  disagreement=True)
+    )
+
+    assert unsure.escalate and "low reviewer confidence" in unsure.reason
+    assert contested.escalate and "disagree" in contested.reason
+
+
+def test_an_accepted_candidate_is_unaffected():
+    """The flags still do their job on everything that was not rejected."""
+    decision = should_escalate(
+        Candidate(12, "big architectural job", verdict="supported",
+                  confidence=0.95, requires_architecture_review=True,
+                  effort="LARGE")
+    )
+
+    assert decision.escalate
+    assert "changes architecture" in decision.reason
+    assert "effort LARGE" in decision.reason
