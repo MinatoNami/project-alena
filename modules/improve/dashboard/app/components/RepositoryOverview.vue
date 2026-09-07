@@ -36,11 +36,17 @@ const { get } = useAlena()
 const clock = useClock()
 clock.load()
 
-const { data } = await useAsyncData('overview', () =>
+const { data, error, status, refresh } = await useAsyncData('overview', () =>
   get<{ repositories: Row[]; totals: Record<string, number> }>('/api/overview'),
 )
 
-const rows = computed(() => data.value?.repositories ?? [])
+const search = ref('')
+const onlyAttention = ref(false)
+const issueCount = (row: Row) => row.disagreements.length + row.unverifiable.length + row.counts.errored_reviews
+const rows = computed(() => (data.value?.repositories ?? [])
+  .filter(row => `${row.name} ${row.id}`.toLowerCase().includes(search.value.toLowerCase()))
+  .filter(row => !onlyAttention.value || issueCount(row) > 0 || row.awaiting_decision > 0)
+  .sort((a, b) => issueCount(b) - issueCount(a) || b.awaiting_decision - a.awaiting_decision || a.name.localeCompare(b.name)))
 const totals = computed(() => data.value?.totals ?? {})
 
 // Ordered so the states a person acts on come first, and terminal ones last.
@@ -66,27 +72,20 @@ function scanAge(row: Row): string {
   const days = Math.floor(
     (Date.now() - new Date(row.scanned_at).getTime()) / 86_400_000,
   )
-  return days === 0 ? 'today' : `${days}d ago`
+  return Number.isNaN(days) ? 'unknown' : days <= 0 ? 'less than 1d' : `${days}d ago`
 }
 
-const attention = computed(() =>
-  (totals.value.disagreements ?? 0) +
-  (totals.value.unverifiable ?? 0) +
-  (totals.value.errored_reviews ?? 0),
-)
 </script>
 
 <template>
-  <section class="mb-8">
-    <h2 class="mb-3 flex items-baseline gap-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">
-      Repositories
-      <span v-if="attention" class="normal-case tracking-normal text-amber-700 dark:text-amber-500">
-        {{ attention }} thing{{ attention === 1 ? '' : 's' }} worth a look
-      </span>
-    </h2>
-
-    <div class="overflow-x-auto rounded border border-neutral-200 dark:border-neutral-800">
-      <table class="w-full text-sm">
+  <section class="panel repository-panel">
+    <div class="panel-heading"><div><h2>Repository signals <span class="count-label">{{ data?.repositories.length ?? '—' }}</span></h2><p>Coverage, work in progress and review quality</p></div><NuxtLink to="/repositories" class="text-link">All repositories →</NuxtLink></div>
+    <div class="repository-filters"><input v-model="search" type="search" aria-label="Search repositories" placeholder="Search repositories…" class="search-input"><label class="live-control"><input v-model="onlyAttention" type="checkbox"> Needs attention</label><span class="muted text-xs">{{ rows.length }} shown · priority first</span></div>
+    <div v-if="error" class="empty-state" role="alert">Repository signals unavailable. <button class="text-link" @click="refresh()">Retry →</button></div>
+    <p v-else-if="status === 'pending' && !data" class="empty-state">Loading repositories…</p>
+    <p v-else-if="!rows.length" class="empty-state">{{ search || onlyAttention ? 'No repositories match these filters.' : 'No repositories registered yet.' }} <button v-if="search || onlyAttention" class="text-link" @click="search = ''; onlyAttention = false">Clear filters</button></p>
+    <div v-if="!error && rows.length" class="overflow-x-auto rounded border border-neutral-200 dark:border-neutral-800">
+      <table class="w-full text-sm repository-table">
         <thead class="text-xs uppercase tracking-wide text-neutral-500">
           <tr class="border-b border-neutral-200 dark:border-neutral-800">
             <th class="px-4 py-2 text-left font-medium">Repository</th>
@@ -96,7 +95,7 @@ const attention = computed(() =>
             <th class="px-3 py-2 text-right font-medium">Research</th>
             <th class="px-3 py-2 text-right font-medium">Observations</th>
             <th class="px-4 py-2 text-left font-medium">Recommendations</th>
-            <th class="px-3 py-2 text-right font-medium">Needs a look</th>
+            <th class="px-3 py-2 text-right font-medium">Quality signals</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-neutral-200 dark:divide-neutral-800">

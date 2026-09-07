@@ -1,113 +1,84 @@
 <script setup lang="ts">
 const { get } = useAlena()
-const { data, error, refresh, status } = await useAsyncData('status', () => get<Status>('/api/status'))
-
-// Reading the pipeline is cheap and the numbers move when a scheduled job
-// runs, so the page refreshes itself rather than going stale on a tab left
-// open overnight.
-onMounted(() => {
-  const timer = setInterval(refresh, 30_000)
-  onUnmounted(() => clearInterval(timer))
+const clock = useClock()
+clock.load()
+const live = ref(true)
+const refreshing = ref(false)
+const updatedAt = ref<string | null>(null)
+const { data, error, refresh, status } = await useAsyncData('status', async () => {
+  const result = await get<Status>('/api/status')
+  updatedAt.value = new Date().toISOString()
+  return result
 })
+type Activity = { kind: string; at: string; repository_id: string; summary: string; adverse: boolean }
+const { data: activity, error: activityError, refresh: refreshActivity } = await useAsyncData('overview-activity', () => get<{ events: Activity[] }>('/api/history?limit=6'))
+const stalled = computed(() => data.value?.stages.filter(s => s.stale) ?? [])
+const jobIssues = computed(() => data.value?.jobs.filter(j => j.failing || !j.loaded) ?? [])
+const attentionCount = computed(() => (data.value?.stranded.length ?? 0) + stalled.value.length + jobIssues.value.length)
+const stageNames: Record<string, string> = { unreviewed: 'Review', unscored: 'Score', undecided: 'Decide', unimplemented: 'Implement', unresolved: 'Evaluate' }
+const stageLinks: Record<string, string> = { unreviewed: '/research', unscored: '/research', undecided: '/queue', unimplemented: '/queue', unresolved: '/queue' }
+async function refreshAll() {
+  if (refreshing.value) return
+  refreshing.value = true
+  try { await Promise.all([refresh(), refreshActivity(), refreshNuxtData('overview')]) }
+  finally { refreshing.value = false }
+}
+let timer: ReturnType<typeof setInterval> | undefined
+onMounted(() => { timer = setInterval(() => { if (live.value && !document.hidden) refreshAll() }, 30_000) })
+onUnmounted(() => clearInterval(timer))
 </script>
 
 <template>
-  <div>
-    <div v-if="error" class="rounded border border-red-300 bg-red-50 p-4 text-sm dark:border-red-900 dark:bg-red-950">
-      <p class="font-medium">Cannot reach the API.</p>
-      <p class="mt-1 text-neutral-600 dark:text-neutral-400">
-        Start it with <code class="font-mono">scripts/start_alena_dashboard.sh</code>.
-      </p>
-    </div>
-
-    <template v-else-if="data">
-      <section class="mb-8 flex flex-wrap gap-x-10 gap-y-2 text-sm">
-        <div>
-          <span class="text-neutral-500">Repositories</span>
-          <span class="ml-2 font-medium">{{ data.coverage.scanned }}/{{ data.coverage.repositories }} scanned</span>
-        </div>
-        <div>
-          <span class="text-neutral-500">Last scan</span>
-          <span class="ml-2 font-medium">
-            {{ data.coverage.last_scan_days === null ? 'never' : `${data.coverage.last_scan_days}d ago` }}
-          </span>
-        </div>
-        <div>
-          <span class="text-neutral-500">Research</span>
-          <span class="ml-2 font-medium">{{ data.coverage.research_documents }} document(s)</span>
-        </div>
-      </section>
-
-      <section class="mb-8">
-        <h2 class="mb-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Pipeline</h2>
-        <details class="mb-3 rounded border border-neutral-200 dark:border-neutral-800">
-          <summary class="cursor-pointer px-4 py-2 text-xs text-neutral-500">How a night runs</summary>
-          <div class="border-t border-neutral-200 px-4 py-3 dark:border-neutral-800">
-            <PipelineDiagram :stages="data.stages" />
-          </div>
-        </details>
-        <ul class="divide-y divide-neutral-200 rounded border border-neutral-200 dark:divide-neutral-800 dark:border-neutral-800">
-          <li
-            v-for="stage in data.stages"
-            :key="stage.name"
-            class="flex items-baseline justify-between px-4 py-3 text-sm"
-          >
-            <span :class="stage.stale ? 'text-amber-700 dark:text-amber-500' : ''">
-              {{ stage.label }}
-              <span v-if="stage.stale" class="ml-2 text-xs">stalled</span>
-            </span>
-            <span class="tabular-nums">
-              <span :class="stage.count ? 'font-medium' : 'text-neutral-400'">{{ stage.count || 'none' }}</span>
-              <span v-if="stage.oldest_days !== null && stage.count" class="ml-2 text-xs text-neutral-500">
-                oldest {{ stage.oldest_days }}d
-              </span>
-            </span>
-          </li>
-        </ul>
-      </section>
-
-      <RepositoryOverview />
-
-      <section v-if="data.jobs.length" class="mb-8">
-        <h2 class="mb-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Scheduled</h2>
-        <ul class="space-y-1 text-sm">
-          <li
-            v-for="job in data.jobs"
-            :key="job.label"
-            :class="job.failing ? 'text-red-700 dark:text-red-400' : 'text-neutral-600 dark:text-neutral-400'"
-          >{{ job.description }}</li>
-        </ul>
-      </section>
-
-      <section
-        v-if="data.stranded.length"
-        class="mb-8 rounded border border-amber-300 bg-amber-50 p-4 text-sm dark:border-amber-900 dark:bg-amber-950"
-      >
-        <p class="font-medium">
-          {{ data.stranded.length }} observation(s) have a failed review and will not be retried on their own.
-        </p>
-        <ul class="mt-2 space-y-1 text-neutral-700 dark:text-neutral-300">
-          <li v-for="row in data.stranded" :key="row.title">{{ row.repository_id }} — {{ row.title }}</li>
-        </ul>
-        <p class="mt-2 font-mono text-xs">alena-improve review --all --retry-failed</p>
-      </section>
-
-      <div class="mb-8 border-t border-neutral-200 pt-6 dark:border-neutral-800">
-        <RunPanel @finished="refresh" />
+  <div class="overview">
+    <div class="page-heading">
+      <div><p class="eyebrow">OPERATIONS</p><h1>Overview</h1><p class="muted">Your improvement loop, at a glance.</p></div>
+      <div class="refresh-controls">
+        <label class="live-control"><input v-model="live" type="checkbox"> Auto-refresh · 30s</label>
+        <button class="secondary-button" :disabled="refreshing || status === 'pending'" @click="refreshAll">{{ refreshing ? 'Refreshing…' : '↻ Refresh' }}</button>
+        <span class="refresh-time">{{ updatedAt ? `Status updated ${clock.time(updatedAt)}` : 'Waiting for first update' }} {{ updatedAt ? clock.zoneLabel : '' }}</span>
       </div>
-
-      <p v-if="data.waiting_on_you" class="text-sm">
-        <NuxtLink to="/queue" class="font-medium underline">
-          {{ data.waiting_on_you }} recommendation(s) need a decision
-        </NuxtLink>
-      </p>
-      <p v-else-if="!data.coverage.research_documents" class="text-sm text-neutral-500">
-        Nothing needs you. The loop produces recommendations once research is ingested:
-        <span class="font-mono text-xs">alena-improve ingest-research &lt;repository&gt; &lt;file.md&gt;</span>
-      </p>
-      <p v-else class="text-sm text-neutral-500">Nothing needs you.</p>
+    </div>
+    <div v-if="error" class="notice danger" role="alert"><strong>Overview unavailable</strong><p>Cannot load current status. Check the dashboard service and try again.</p><button class="text-link" @click="refreshAll">Retry connection →</button></div>
+    <template v-else-if="data">
+      <div class="health-strip" :class="attentionCount ? 'warning' : ''"><span class="status-dot" /><strong>{{ attentionCount ? 'Attention needed' : 'No pipeline alerts' }}</strong><span>{{ attentionCount ? `${attentionCount} failed reviews, stalled stages or schedule issues to investigate.` : 'No failed reviews, stalled stages or schedule issues reported.' }}</span><a href="#attention" class="text-link">View details ↓</a></div>
+      <section class="metric-grid" aria-label="Current workspace metrics">
+        <NuxtLink to="/queue" class="metric-card"><span class="metric-label">Awaiting your decision <span>↗</span></span><strong>{{ data.waiting_on_you }}</strong><span class="metric-caption">{{ data.waiting_on_you ? 'Review recommendations to move work forward' : 'No recommendations waiting for approval' }}</span></NuxtLink>
+        <a href="#pipeline" class="metric-card"><span class="metric-label">Stalled stages <span>↘</span></span><strong :class="stalled.length ? 'warning-text' : ''">{{ stalled.length }}<small> / {{ data.stages.length }}</small></strong><span class="metric-caption">Work older than its stage threshold</span></a>
+        <NuxtLink to="/repositories" class="metric-card"><span class="metric-label">Scan coverage <span>↗</span></span><strong>{{ data.coverage.scanned }}<small> / {{ data.coverage.repositories }}</small></strong><span class="metric-caption">{{ data.coverage.last_scan ? `Latest scan ${clock.dateTime(data.coverage.last_scan)}` : 'No scans recorded yet' }}</span></NuxtLink>
+        <NuxtLink to="/research" class="metric-card"><span class="metric-label">Research documents <span>↗</span></span><strong>{{ data.coverage.research_documents }}</strong><span class="metric-caption">Total ingested across repositories</span></NuxtLink>
+      </section>
+      <div class="overview-columns">
+        <section id="pipeline" class="panel">
+          <div class="panel-heading"><div><h2>Pipeline workload</h2><p>Current backlog at each hand-off</p></div><span class="pill neutral">CURRENT</span></div>
+          <div class="pipeline-stages">
+            <NuxtLink v-for="(stage, index) in data.stages" :key="stage.name" :to="stageLinks[stage.name] || '/history'" class="pipeline-stage" :class="{ stalled: stage.stale }">
+              <div class="stage-label"><span class="stage-number">0{{ index + 1 }}</span>{{ stageNames[stage.name] || stage.name }}<span aria-hidden="true">→</span></div>
+              <strong>{{ stage.count }}</strong><p>{{ stage.label }}</p>
+              <span class="stage-age">{{ stage.stale ? 'Stalled · ' : '' }}{{ stage.count && stage.oldest_days !== null ? `Oldest ${stage.oldest_days}d` : stage.count ? 'Age unavailable' : 'Queue clear' }}</span>
+            </NuxtLink>
+          </div>
+          <details class="pipeline-explainer"><summary>How the improvement loop works</summary><PipelineDiagram :stages="data.stages" /></details>
+        </section>
+        <section class="panel schedule-panel"><div class="panel-heading"><div><h2>Automation</h2><p>Scheduled job status</p></div></div>
+          <div v-for="job in data.jobs" :key="job.label" class="schedule-job"><span class="pill" :class="job.running ? 'info' : job.failing ? 'danger' : !job.loaded ? 'warning' : 'neutral'">{{ job.running ? 'Running' : job.failing ? 'Failed' : !job.loaded ? 'Not installed' : 'Loaded' }}</span><h3>{{ job.label === 'local.alena.cycle' ? 'Nightly improvement cycle' : job.label }}</h3><p>{{ job.description }}</p></div>
+          <p v-if="!data.jobs.length" class="empty-state">Schedule information is unavailable on this host.</p><a href="#run-controls" class="text-link schedule-link">Open manual controls ↓</a>
+        </section>
+      </div>
+      <section id="attention" class="panel attention-panel"><div class="panel-heading"><div><h2>Needs attention <span class="count-label">{{ attentionCount + (data.waiting_on_you ? 1 : 0) }}</span></h2><p>Issues and decisions with a next step</p></div></div>
+        <div v-if="data.waiting_on_you" class="attention-row"><span class="pill info">Decision</span><div><strong>{{ data.waiting_on_you }} recommendations need your review</strong><p>Accept or reject proposals before implementation begins.</p></div><NuxtLink to="/queue" class="text-link">Review decisions →</NuxtLink></div>
+        <div v-for="job in jobIssues" :key="job.label" class="attention-row"><span class="pill danger">Schedule</span><div><strong>{{ job.label }}</strong><p>{{ job.description }}. Inspect the scheduler configuration and job logs.</p></div><NuxtLink to="/history" class="text-link">Check activity →</NuxtLink></div>
+        <div v-for="stage in stalled" :key="stage.name" class="attention-row"><span class="pill warning">Stalled</span><div><strong>{{ stage.label }}</strong><p>{{ stage.count }} waiting · oldest {{ stage.oldest_days }} days</p><p v-if="stage.examples.length" class="attention-example">{{ stage.examples.join(' · ') }}</p></div><NuxtLink :to="stageLinks[stage.name] || '/history'" class="text-link">Inspect work →</NuxtLink></div>
+        <div v-for="(row, index) in data.stranded" :key="`${row.repository_id}-${index}`" class="attention-row"><span class="pill danger">Review failed</span><div><strong>{{ row.title }}</strong><p>{{ row.repository_id }} · Will not retry automatically.</p><details><summary class="text-link">Recovery command</summary><code class="recovery-command">alena-improve review {{ row.repository_id }} --retry-failed</code></details></div><NuxtLink :to="`/repositories/${encodeURIComponent(row.repository_id)}`" class="text-link">Repository →</NuxtLink></div>
+        <p v-if="!attentionCount && !data.waiting_on_you" class="empty-state">Nothing waiting for intervention. Review repository signals below for quality concerns.</p>
+      </section>
+      <RepositoryOverview />
+      <section class="panel activity-panel"><div class="panel-heading"><div><h2>Recent activity</h2><p>Latest 6 recorded events · {{ clock.zoneLabel || 'local time' }}</p></div><NuxtLink to="/history" class="text-link">View all activity →</NuxtLink></div>
+        <p v-if="activityError" class="empty-state" role="alert">Activity could not be loaded. Use Refresh to try again.</p>
+        <template v-else><NuxtLink v-for="(event, index) in activity?.events ?? []" :key="index" :to="`/repositories/${encodeURIComponent(event.repository_id)}`" class="activity-row"><span class="event-marker" :class="{ adverse: event.adverse }"/><div><strong>{{ event.summary }}</strong><p>{{ event.repository_id }} · {{ event.kind }}{{ event.adverse ? ' · Needs review' : '' }}</p></div><time :datetime="event.at">{{ clock.dateTime(event.at) }}</time></NuxtLink><p v-if="!activity?.events.length" class="empty-state">No activity recorded yet. Start a scan using the manual controls below.</p></template>
+      </section>
+      <section id="run-controls" class="panel manual-panel"><div class="panel-heading"><div><h2>Manual controls</h2><p>Start a cycle or an individual step and follow its output.</p></div></div><div class="panel-body"><RunPanel @finished="refreshAll" /></div></section>
+      <p class="overview-footnote">Current pipeline snapshot · Activity is recorded history. Cost, token usage and end-to-end latency are not measured by this dashboard.</p>
     </template>
-
-    <p v-else-if="status === 'pending'" class="text-sm text-neutral-500">Loading…</p>
+    <div v-else class="panel empty-state" role="status">Loading workspace status…</div>
   </div>
 </template>

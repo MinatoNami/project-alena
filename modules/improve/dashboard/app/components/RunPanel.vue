@@ -32,38 +32,56 @@ const emit = defineEmits<{ finished: [] }>()
 // Commands that act on the whole portfolio. `implement` takes a specific
 // recommendation, so it belongs on that recommendation, not in a row of
 // buttons where a stray click reaches it.
-const { data: all } = await useAsyncData('commands', () => get<Command[]>('/api/commands'))
+const { data: all, error: commandError, refresh: refreshCommands } = await useAsyncData('commands', () => get<Command[]>('/api/commands'))
 const commands = computed(() => (all.value ?? []).filter((c) => !c.parameters.length))
 const runs = ref<Run[]>([])
 const current = ref<Run | null>(null)
 const active = ref<Run | null>(null)
 const failure = ref<string | null>(null)
+const starting = ref(false)
+const runError = ref<string | null>(null)
+let disposed = false
+let refreshingRuns = false
 const focus = ref('')
 let timer: ReturnType<typeof setInterval> | null = null
 
 async function refresh() {
-  const body = await get<{ current: Run | null; runs: Run[] }>('/api/runs')
-  current.value = body.current
-  runs.value = body.runs
-  if (active.value) {
-    const detail = await get<Run>(`/api/runs/${active.value.id}`)
-    const wasRunning = active.value.state === 'running'
-    active.value = detail
-    // The pipeline numbers only change once the work is done, so the page
-    // behind this refreshes on the transition rather than on every poll.
-    if (wasRunning && detail.state !== 'running') emit('finished')
-  }
-  if (!current.value && timer) {
-    clearInterval(timer)
-    timer = null
+  if (refreshingRuns || disposed) return
+  refreshingRuns = true
+  try {
+    const body = await get<{ current: Run | null; runs: Run[] }>('/api/runs')
+    current.value = body.current
+    runs.value = body.runs
+    if (active.value) {
+      const detail = await get<Run>(`/api/runs/${active.value.id}`)
+      const wasRunning = active.value.state === 'running'
+      active.value = detail
+      if (wasRunning && detail.state !== 'running') emit('finished')
+    }
+    if (current.value && !active.value) {
+      active.value = await get<Run>(`/api/runs/${current.value.id}`)
+    }
+    runError.value = null
+    if (!current.value && timer) {
+      clearInterval(timer)
+      timer = null
+    } else if (current.value) {
+      poll()
+    }
+  } catch (e: any) {
+    runError.value = e?.data?.detail ?? 'Cannot refresh runs. Check the connection and retry.'
+  } finally {
+    refreshingRuns = false
   }
 }
 
 function poll() {
-  if (!timer) timer = setInterval(refresh, 2000)
+  if (!timer && !disposed) timer = setInterval(refresh, 2000)
 }
 
 async function start(key: string) {
+  if (busy.value) return
+  starting.value = true
   failure.value = null
   const command = commands.value.find((c) => c.key === key)
   try {
@@ -73,21 +91,27 @@ async function start(key: string) {
       // quietly dropping it.
       focus: command?.accepts_focus ? focus.value || undefined : undefined,
     })
+    current.value = active.value
     poll()
   } catch (e: any) {
     // 409 is the interesting one: something is already running. Nothing is
     // broken, so it reads as information rather than an error.
     failure.value = e?.data?.detail ?? e?.message ?? 'Could not start.'
+  } finally {
+    starting.value = false
   }
 }
 
-onMounted(() => {
-  refresh()
+onMounted(async () => {
+  await refresh()
   if (current.value) poll()
 })
-onUnmounted(() => timer && clearInterval(timer))
+onUnmounted(() => {
+  disposed = true
+  if (timer) clearInterval(timer)
+})
 
-const busy = computed(() => Boolean(current.value))
+const busy = computed(() => starting.value || Boolean(current.value))
 const focusable = computed(() => commands.value.filter((c) => c.accepts_focus))
 </script>
 
@@ -95,6 +119,8 @@ const focusable = computed(() => commands.value.filter((c) => c.accepts_focus))
   <section>
     <h2 class="mb-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Run a step</h2>
 
+    <p v-if="commandError" class="mb-3 text-sm" role="alert">Commands unavailable. <button class="text-link" @click="refreshCommands()">Retry commands →</button></p>
+    <p v-if="runError" class="mb-3 text-sm" role="alert">{{ runError }} <button class="text-link" @click="refresh()">Retry run status →</button></p>
     <div class="flex flex-wrap gap-2">
       <button
         v-for="command in commands"
@@ -109,14 +135,15 @@ const focusable = computed(() => commands.value.filter((c) => c.accepts_focus))
       </button>
     </div>
 
-    <div class="mt-3">
-      <label class="text-xs text-neutral-500">
+    <div v-if="focusable.length" class="mt-3">
+      <label for="run-focus" class="text-xs text-neutral-500">
         Steer this run (optional) — what to pay particular attention to. This is
         yours, so the agent follows it, unlike research text which it judges.
         Applies to
         <span class="font-medium">{{ focusable.map((c) => c.label).join(' and ') }}</span>.
       </label>
       <textarea
+        id="run-focus"
         v-model="focus"
         rows="2"
         class="mt-1 w-full rounded border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-900"
@@ -127,7 +154,7 @@ const focusable = computed(() => commands.value.filter((c) => c.accepts_focus))
     <p class="mt-2 text-xs text-neutral-500">
       One at a time — they share a database and the same workspaces.
       <span class="text-amber-700 dark:text-amber-500">$</span> spends beyond local compute.
-      Implementing is not here: it writes to a repository and stays a command you watch.
+      To implement an accepted recommendation, open Decisions.
     </p>
 
     <p
@@ -157,7 +184,7 @@ const focusable = computed(() => commands.value.filter((c) => c.accepts_focus))
       <p v-else class="px-4 py-3 text-xs text-neutral-500">No output yet.</p>
     </div>
 
-    <div v-if="runs.length > 1" class="mt-4">
+    <div v-if="runs.length" class="mt-4">
       <h3 class="text-xs font-semibold uppercase tracking-wide text-neutral-500">Recent</h3>
       <ul class="mt-2 space-y-1 text-xs">
         <li v-for="run in runs.slice(0, 6)" :key="run.id" class="flex gap-3 text-neutral-500">

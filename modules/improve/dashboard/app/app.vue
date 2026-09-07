@@ -1,34 +1,39 @@
 <script setup lang="ts">
+const route = useRoute()
 const links = [
-  { to: '/', label: 'Status' },
-  { to: '/queue', label: 'Queue' },
-  { to: '/research', label: 'Research' },
-  { to: '/propose', label: 'Propose' },
-  { to: '/repositories', label: 'Repositories' },
-  { to: '/portfolio', label: 'Portfolio' },
-  { to: '/history', label: 'History' },
-  { to: '/tools', label: 'Tools' },
+  { to: '/', label: 'Overview', icon: '◫', group: 'Monitor' },
+  { to: '/history', label: 'Activity', icon: '◷', group: 'Monitor' },
+  { to: '/tools', label: 'Tool health', icon: '⌁', group: 'Monitor' },
+  { to: '/queue', label: 'Decisions', icon: '☷', group: 'Workspace' },
+  { to: '/repositories', label: 'Repositories', icon: '▱', group: 'Workspace' },
+  { to: '/research', label: 'Research', icon: '▤', group: 'Workspace' },
+  { to: '/portfolio', label: 'Portfolio', icon: '⊞', group: 'Workspace' },
+  { to: '/propose', label: 'Propose an idea', icon: '+', group: 'Workspace' },
 ]
+const title = computed(() => links.find(l => l.to === route.path)?.label ?? 'Repository details')
 </script>
 
 <template>
-  <div class="min-h-screen bg-neutral-50 text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
-    <header class="border-b border-neutral-200 dark:border-neutral-800">
-      <div class="mx-auto flex max-w-5xl flex-wrap items-baseline gap-x-6 gap-y-2 px-6 py-4">
-        <NuxtLink to="/" class="text-sm font-semibold tracking-tight">ALENA</NuxtLink>
-        <nav class="flex gap-4 text-sm">
-          <NuxtLink
-            v-for="link in links"
-            :key="link.to"
-            :to="link.to"
-            class="text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100"
-            active-class="text-neutral-900 font-medium dark:text-neutral-100"
-          >{{ link.label }}</NuxtLink>
-        </nav>
-      </div>
-    </header>
-    <main class="mx-auto max-w-5xl px-6 py-8">
-      <NuxtPage />
-    </main>
+  <div class="app-shell">
+    <a href="#main-content" class="skip-link">Skip to content</a>
+    <aside class="sidebar">
+      <NuxtLink to="/" class="brand"><span class="brand-mark">a</span><span>alena<span class="brand-sub">IMPROVEMENT WORKSPACE</span></span></NuxtLink>
+      <nav aria-label="Main navigation">
+        <div v-for="group in ['Monitor', 'Workspace']" :key="group" class="nav-group">
+          <p class="eyebrow">{{ group }}</p>
+          <NuxtLink v-for="link in links.filter(l => l.group === group)" :key="link.to" :to="link.to" class="nav-link" :class="{ selected: link.to === '/' ? route.path === '/' : route.path.startsWith(link.to) }">
+            <span aria-hidden="true" class="nav-icon">{{ link.icon }}</span>{{ link.label }}
+          </NuxtLink>
+        </div>
+      </nav>
+      <div class="sidebar-footer"><span class="local-dot" /> Local workspace<p>Observe. Review. Improve.</p></div>
+    </aside>
+    <div class="workspace">
+      <header class="workspace-header"><span>Workspace <span class="breadcrumb-divider">/</span> <strong>{{ title }}</strong></span><span class="environment">LOCAL</span></header>
+      <main id="main-content" class="workspace-main">
+        <div v-if="route.path !== '/'" class="page-heading"><div><p class="eyebrow">ALENA WORKSPACE</p><h1>{{ title }}</h1></div></div>
+        <NuxtPage />
+      </main>
+    </div>
   </div>
 </template>

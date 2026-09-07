@@ -1,7 +1,9 @@
 # alena-improve dashboard
 
-Nuxt 4 + Tailwind, over a FastAPI adapter. Five pages: status, the approval
-queue, repositories, portfolio, tool metrics.
+Nuxt 4 + Tailwind, over a FastAPI adapter. The overview brings together
+pipeline alerts, pending decisions, repository signals, schedules and recent
+activity. See [design rationale and research](DESIGN.md) for the observability
+principles and measurement boundaries.
 
 ```bash
 scripts/start_alena_dashboard.sh          # dev, hot reload on 3100
@@ -171,8 +173,9 @@ not be choosing one.
 | Propose | An idea of your own, entering where research does |
 | Tools | Effectiveness from the audit log |
 
-The status page refreshes every 30 seconds, because the numbers move when a
-scheduled job runs and a tab left open overnight should not lie.
+The overview refreshes status, repository signals and recent activity together
+every 30 seconds while visible. Auto-refresh can be paused; Refresh updates all
+three immediately. Repository search and the attention filter affect the table only.
 
 Rejecting requires a reason, and the form says why: the reason reaches the
 context package and the next reviewer's prompt, and without one the same idea
