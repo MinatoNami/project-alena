@@ -255,6 +255,15 @@ def create_app() -> FastAPI:
             "waiting_on_you": state["waiting_on_you"],
         }
 
+    @app.get("/api/overview")
+    async def get_overview() -> Dict[str, Any]:
+        """Every repository on one row, plus what had no page at all.
+
+        The dashboard has a page per concept, so the state of one repository
+        was spread across four of them. This is the join, done once.
+        """
+        return query.overview(registry())
+
     @app.get("/api/repositories")
     async def get_repositories() -> List[Dict[str, Any]]:
         return query.list_repositories(registry())

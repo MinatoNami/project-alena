@@ -66,6 +66,8 @@ onMounted(() => {
         </ul>
       </section>
 
+      <RepositoryOverview />
+
       <section v-if="data.jobs.length" class="mb-8">
         <h2 class="mb-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">Scheduled</h2>
         <ul class="space-y-1 text-sm">

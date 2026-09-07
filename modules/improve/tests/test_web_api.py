@@ -579,3 +579,27 @@ def test_research_can_be_filtered_by_repository(client, repository):
 
     assert client.get("/api/research?repository_id=sample").json()
     assert client.get("/api/research?repository_id=nope").status_code == 404
+
+
+# -- the consolidated view --------------------------------------------------
+
+
+def test_overview_puts_every_repository_on_one_row(client):
+    body = client.get("/api/overview").json()
+
+    assert "repositories" in body and "totals" in body
+    for row in body["repositories"]:
+        # The join that previously required four pages.
+        assert {"counts", "recommendations", "disagreements", "unverifiable"} <= set(row)
+        assert {"observations", "unreviewed", "research", "errored_reviews"} <= set(
+            row["counts"]
+        )
+
+
+def test_overview_surfaces_what_had_no_page(client):
+    """A recorded disagreement that nobody can see is not a recorded
+    disagreement. Same for a citation that cannot resolve, and a review that
+    errored -- `status` counted those in aggregate and never said where."""
+    totals = client.get("/api/overview").json()["totals"]
+
+    assert {"awaiting_decision", "disagreements", "unverifiable", "errored_reviews"} == set(totals)

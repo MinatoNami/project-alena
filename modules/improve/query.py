@@ -21,7 +21,7 @@ from .persistence import (
 from .portfolio import analyse, build_graph
 from .registry import RegistryError, RepositoryRegistry, load_registry
 from .scan import GitRepository
-from .text import jaccard
+from .text import jaccard, unverifiable_citations
 
 MAX_SEARCH_RESULTS = 200
 # A line of context is cheap; a screenful per hit fills the model's window with
@@ -334,3 +334,105 @@ def search_capability(
     repositories = registry.all()
     graph = build_graph(repositories, {r.id: latest_scan(r.id) for r in repositories})
     return graph.search(term)
+
+
+def overview(registry: Optional[RepositoryRegistry] = None) -> Dict[str, Any]:
+    """Everything about every repository, on one row each.
+
+    The dashboard grew a page per concept -- repositories, queue, research,
+    history, portfolio, tools -- and answering "what is the state of
+    luma-index?" meant visiting four of them and holding the join in your head.
+    The join belongs here: one query, one shape, one screen.
+
+    Three things are surfaced that had no page at all. A reviewer disagreement
+    was recorded and then invisible, which is the opposite of the intent --
+    "a disagreement is a result, not a problem to average away" is only true if
+    somebody sees it. Citations that cannot resolve were being detected at
+    ingest and mentioned in a log. And a review that errored was counted by
+    `status` in aggregate but never attributed to a repository.
+    """
+    from .persistence import get_connection
+
+    conn = get_connection()
+    rows = []
+    for repository in _registry(registry).all():
+        scan = latest_scan(repository.id) or {}
+        counts = {
+            name: conn.execute(sql, (repository.id,)).fetchone()[0]
+            for name, sql in {
+                "observations": "SELECT COUNT(*) FROM observations WHERE repository_id=?",
+                "unreviewed": (
+                    "SELECT COUNT(*) FROM observations o WHERE o.repository_id=? AND"
+                    " NOT EXISTS (SELECT 1 FROM engineering_reviews r"
+                    " WHERE r.observation_id=o.id)"
+                ),
+                "research": (
+                    "SELECT COUNT(*) FROM research_documents WHERE repository_id=?"
+                ),
+                "errored_reviews": (
+                    "SELECT COUNT(*) FROM engineering_reviews"
+                    " WHERE repository_id=? AND verdict='error'"
+                ),
+            }.items()
+        }
+
+        by_status: Dict[str, int] = {}
+        for row in conn.execute(
+            "SELECT status, COUNT(*) n FROM recommendations WHERE repository_id=?"
+            " GROUP BY status",
+            (repository.id,),
+        ):
+            by_status[row["status"]] = row["n"]
+
+        # Two reviewers, opposite conclusions, on the same observation.
+        disagreements = [
+            dict(row)
+            for row in conn.execute(
+                "SELECT o.id, o.title,"
+                " GROUP_CONCAT(e.agent || '=' || e.verdict) AS verdicts"
+                " FROM observations o JOIN engineering_reviews e"
+                " ON e.observation_id = o.id"
+                " WHERE o.repository_id = ? AND e.verdict != 'error'"
+                " GROUP BY o.id"
+                " HAVING COUNT(DISTINCT e.agent) > 1"
+                " AND COUNT(DISTINCT e.verdict) > 1",
+                (repository.id,),
+            )
+        ]
+
+        unverifiable = [
+            {"id": row["id"], "title": row["title"], "citations": bad}
+            for row in conn.execute(
+                "SELECT id, title, evidence FROM observations"
+                " WHERE repository_id=? AND evidence IS NOT NULL",
+                (repository.id,),
+            )
+            if (bad := unverifiable_citations(row["evidence"]))
+        ]
+
+        rows.append(
+            {
+                **repository.to_dict(),
+                "scanned_at": scan.get("scanned_at"),
+                "head_sha": (scan.get("head_sha") or "")[:12],
+                "file_count": scan.get("file_count"),
+                "todos": len(scan.get("todos") or []),
+                "dependencies": len(scan.get("dependencies") or []),
+                "languages": list(scan.get("languages") or {}),
+                "counts": counts,
+                "recommendations": by_status,
+                "awaiting_decision": by_status.get("recommended", 0),
+                "disagreements": disagreements,
+                "unverifiable": unverifiable,
+            }
+        )
+
+    return {
+        "repositories": rows,
+        "totals": {
+            "awaiting_decision": sum(r["awaiting_decision"] for r in rows),
+            "disagreements": sum(len(r["disagreements"]) for r in rows),
+            "unverifiable": sum(len(r["unverifiable"]) for r in rows),
+            "errored_reviews": sum(r["counts"]["errored_reviews"] for r in rows),
+        },
+    }
