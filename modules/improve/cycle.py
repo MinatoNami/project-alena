@@ -56,6 +56,11 @@ class RepositoryCycle:
     scanned: bool = False
     unchanged: bool = False
     ingested: int = 0
+    # Files found in the drop directory, whether or not any were new. A pass
+    # that looked at a document and found it already ingested reported exactly
+    # the same as one where the step never ran -- which is how a working
+    # nightly run reads as "research and review were not triggered".
+    documents_seen: int = 0
     investigated: int = 0
     observations: int = 0
     duplicates: List[str] = field(default_factory=list)
@@ -70,16 +75,27 @@ class RepositoryCycle:
             return f"{self.repository_id}: {self.errors[0]}"
         parts = []
         parts.append("unchanged" if self.unchanged else "scanned")
+
+        # Every step says what it did, including nothing. Silence is
+        # indistinguishable from a step that never ran, and a reader with a
+        # document sitting in the drop directory will reasonably conclude the
+        # second.
         if self.ingested:
             parts.append(f"{self.ingested} document(s), {self.observations} new")
         elif self.observations:
             parts.append(f"{self.observations} new observation(s)")
+        elif self.documents_seen:
+            parts.append(f"{self.documents_seen} document(s), already ingested")
+        else:
+            parts.append("no research dropped")
+
         if self.investigated:
             parts.append(f"investigated in {self.investigated} tool call(s)")
         if self.duplicates:
             parts.append(f"{len(self.duplicates)} already outstanding")
-        if self.reviewed:
-            parts.append(f"{self.reviewed} reviewed")
+        parts.append(
+            f"{self.reviewed} reviewed" if self.reviewed else "nothing new to review"
+        )
         if self.review_failures:
             parts.append(f"{self.review_failures} review(s) failed")
         if self.awaiting_decision:
@@ -147,7 +163,9 @@ async def cycle_repository_async(
     result.unchanged = outcome.skipped
 
     drop = drop or research_dir()
-    for path in research_files(drop / repository.id):
+    found = research_files(drop / repository.id)
+    result.documents_seen = len(found)
+    for path in found:
         ingested = ingest_file(repository, path)
         if not ingested.ok:
             result.errors.append(f"{path.name}: {ingested.error}")

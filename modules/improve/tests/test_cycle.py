@@ -215,3 +215,38 @@ def test_a_failed_refresh_is_reported_rather_than_raised(
     assert run.repositories[0].scanned
     assert run.portfolio_error == "disk full"
     assert run.failed
+
+
+# -- saying what happened, including nothing --------------------------------
+
+
+def test_a_document_already_ingested_is_reported_as_looked_at(registry, drop):
+    """A pass that read a document and found it already ingested used to print
+    exactly what a pass that never looked printed. With a file sitting in the
+    drop directory, that reads as "research did not run"."""
+    first = cycle(registry, "sample", drop=drop, summarize=False, executor=codex())
+    assert "1 document(s), 1 new" in first.repositories[0].describe()
+
+    again = cycle(registry, "sample", drop=drop, summarize=False, executor=codex())
+    described = again.repositories[0].describe()
+
+    assert "already ingested" in described
+    assert again.repositories[0].documents_seen == 1
+
+
+def test_an_empty_drop_directory_says_so(registry, tmp_path):
+    run = cycle(
+        registry, "sample", drop=tmp_path / "empty", summarize=False, executor=codex()
+    )
+
+    assert "no research dropped" in run.repositories[0].describe()
+
+
+def test_review_reports_finding_nothing(registry, tmp_path):
+    """The step every reader looks for. Its absence from the line was the
+    whole complaint."""
+    run = cycle(
+        registry, "sample", drop=tmp_path / "empty", summarize=False, executor=codex()
+    )
+
+    assert "nothing new to review" in run.repositories[0].describe()
